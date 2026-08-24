@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="50%" stop-color="#1E1B4B" />
+      <stop offset="100%" stop-color="#312E81" />
+    </linearGradient>
+
+    <!-- Metallic Gold Gradient -->
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE68A" />
+      <stop offset="30%" stop-color="#F59E0B" />
+      <stop offset="70%" stop-color="#D97706" />
+      <stop offset="100%" stop-color="#78350F" />
+    </linearGradient>
+
+    <!-- Electric Cyan Gradient -->
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#2563EB" />
+    </linearGradient>
+
+    <!-- Emerald Trust Gradient -->
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34D399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+
+    <!-- Glow & Shadow Filters -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <filter id="subtleShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#000" flood-opacity="0.35" />
+    </filter>
+  </defs>
+
+  <!-- App Icon Background Squircle -->
+  <rect width="512" height="512" rx="110" fill="url(#bgGrad)" />
+
+  <!-- Outer Neon Glow Ring -->
+  <circle cx="256" cy="200" r="140" fill="none" stroke="url(#cyanGrad)" stroke-width="2.5" opacity="0.3" />
+
+  <!-- Central Shield Mark (Trust & Security) -->
+  <path d="M 256 95 
+           C 320 95, 365 110, 365 145 
+           C 365 235, 310 295, 256 325 
+           C 202 295, 147 235, 147 145 
+           C 147 110, 192 95, 256 95 Z" 
+        fill="#1E293B" 
+        stroke="url(#cyanGrad)" 
+        stroke-width="7" 
+        filter="url(#subtleShadow)" />
+
+  <!-- Stylized Fast Forward / Growth Wings (Instant Disbursal) -->
+  <path d="M 215 155 L 265 195 L 215 235 Z" fill="url(#greenGrad)" opacity="0.85" filter="url(#glow)" />
+  <path d="M 260 155 L 310 195 L 260 235 Z" fill="url(#greenGrad)" />
+
+  <!-- Rupee Symbol (₹) in Front of Shield -->
+  <!-- Top Horizontal Bar -->
+  <rect x="210" y="145" width="85" height="12" rx="6" fill="url(#goldGrad)" />
+  <!-- Middle Horizontal Bar -->
+  <rect x="210" y="168" width="75" height="12" rx="6" fill="url(#goldGrad)" />
+  <!-- Stem & Curve -->
+  <path d="M 245 145 
+           L 245 205 
+           C 285 205, 290 170, 245 170 
+           M 240 200 
+           L 285 260" 
+        fill="none" 
+        stroke="url(#goldGrad)" 
+        stroke-width="12" 
+        stroke-linecap="round" 
+        stroke-linejoin="round" />
+
+  <!-- Verified Trust Badge (Green Checkmark) -->
+  <circle cx="345" cy="270" r="22" fill="#10B981" filter="url(#glow)" />
+  <path d="M 336 270 L 343 277 L 356 263" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Brand Typography: LOAN BAZAR -->
+  <text x="256" y="395" 
+        text-anchor="middle" 
+        fill="#FFFFFF" 
+        font-family="system-ui, -apple-system, 'SF Pro Display', Roboto, sans-serif" 
+        font-weight="800" 
+        font-size="44" 
+        letter-spacing="4">LOAN<tspan fill="url(#goldGrad)">BAZAR</tspan></text>
+
+  <!-- Tagline -->
+  <text x="256" y="430" 
+        text-anchor="middle" 
+        fill="#94A3B8" 
+        font-family="system-ui, -apple-system, Roboto, sans-serif" 
+        font-weight="500" 
+        font-size="15" 
+        letter-spacing="5">FAST • SECURE • DIGITAL</text>
+</svg>
