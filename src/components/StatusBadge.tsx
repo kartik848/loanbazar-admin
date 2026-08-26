@@ -22,6 +22,13 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
       border: '#FDE047',
       icon: <CheckCircle2 size={13} />,
     },
+    acceptance_submitted: {
+      label: '⚡ ₹1 Submitted (Verify)',
+      bg: '#FEF3C7',
+      text: '#D97706',
+      border: '#FDE68A',
+      icon: <Clock size={13} />,
+    },
     acceptance_done: {
       label: '₹1 Verified (Accepted)',
       bg: '#EFF6FF',

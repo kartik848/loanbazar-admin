@@ -322,6 +322,168 @@ export default function App() {
     if (detailedApp?.id === id) setDetailedApp((prev: any) => ({ ...prev, ...updateData }));
   };
 
+  // 2.1 Admin Approve ₹1 Acceptance Fee Payment (Payment Received)
+  const handleApproveAcceptance = async (id: string, appItem: any) => {
+    const utr = appItem.acceptancePaymentId || appItem.razorpayPaymentId || 'Verified';
+    if (!window.confirm(`CONFIRM ₹1 PAYMENT APPROVAL:\n\nApplicant: ${appItem.fullName}\nSubmitted UTR / Ref: ${utr}\n\nHave you verified ₹1 in Razorpay or Bank statement?\nApproving will verify acceptance and enable immediate bank disbursal.`)) return;
+
+    const now = new Date();
+    const updateData: any = {
+      status: 'acceptance_done',
+      acceptanceFeePaid: true,
+      acceptancePaidAt: now.toISOString(),
+      userConsentApproved: true,
+      autoPayConsentAccepted: true,
+      acceptanceRejectReason: null,
+      acceptanceApprovedBy: 'admin@gmail.com',
+      acceptanceApprovedAt: now.toISOString(),
+    };
+
+    try {
+      await updateDoc(doc(db, 'applications', id), updateData);
+
+      // Update matching repayments entry to verified
+      const repSnap = await getDocs(query(collection(db, 'repayments'), where('applicationId', '==', id)));
+      for (const d of repSnap.docs) {
+        if (d.data().type === 'acceptance_fee') {
+          await updateDoc(doc(db, 'repayments', d.id), { status: 'verified', verifiedAt: now.toISOString(), verifiedBy: 'admin@gmail.com' });
+        }
+      }
+    } catch (err) {
+      console.warn("Firestore approve acceptance fallback:", err);
+    }
+
+    setApplications(prev => prev.map(a => a.id === id ? { ...a, ...updateData } : a));
+    if (detailedApp?.id === id) setDetailedApp((prev: any) => ({ ...prev, ...updateData }));
+    alert(`✓ ₹1 Payment for ${appItem.fullName} approved successfully! Now ready for bank disbursal.`);
+  };
+
+  // 2.2 Admin Reject ₹1 Acceptance Fee Payment
+  const handleRejectAcceptance = async (id: string, appItem: any) => {
+    const reason = window.prompt(`Enter ₹1 verification rejection reason for ${appItem.fullName}:`, "Payment not received in Razorpay account / Invalid UTR reference");
+    if (reason === null) return;
+
+    const updateData: any = {
+      status: 'approved',
+      acceptanceFeePaid: false,
+      acceptanceRejectReason: reason || 'Invalid UTR reference / payment not received',
+      acceptancePaymentId: null,
+      razorpayPaymentId: null,
+    };
+
+    try {
+      await updateDoc(doc(db, 'applications', id), updateData);
+
+      const repSnap = await getDocs(query(collection(db, 'repayments'), where('applicationId', '==', id)));
+      for (const d of repSnap.docs) {
+        if (d.data().type === 'acceptance_fee') {
+          await updateDoc(doc(db, 'repayments', d.id), { status: 'rejected', rejectedReason: reason, rejectedAt: new Date().toISOString() });
+        }
+      }
+    } catch (err) {
+      console.warn("Firestore reject acceptance fallback:", err);
+    }
+
+    setApplications(prev => prev.map(a => a.id === id ? { ...a, ...updateData } : a));
+    if (detailedApp?.id === id) setDetailedApp((prev: any) => ({ ...prev, ...updateData }));
+    alert(`✕ ₹1 Payment rejected. User will be asked to re-pay and submit valid UTR in their app.`);
+  };
+
+  // 2.3 Admin Approve EMI Repayment (Payment Received)
+  const handleApproveEmiRepayment = async (repItem: any) => {
+    const loanId = repItem.applicationId;
+    const loan = applications.find(a => a.id === loanId);
+    if (!loan) {
+      alert("Associated loan application not found!");
+      return;
+    }
+
+    const amt = Number(repItem.amount) || 0;
+    if (!window.confirm(`CONFIRM EMI PAYMENT APPROVAL:\n\nBorrower: ${repItem.userName || loan.fullName}\nAmount: ₹${amt.toLocaleString('en-IN')}\nSubmitted UTR / Ref: ${repItem.paymentId}\n\nHave you verified ₹${amt.toLocaleString('en-IN')} in your bank/Razorpay account?\nApproving will advance the loan EMI and update user app in real-time.`)) return;
+
+    const now = new Date();
+    const tMonths = Number(loan.tenureMonths) || 0;
+    const tDays = Number(loan.tenureDays) || 0;
+    const isShortTerm = (tDays === 7 || tDays === 15 || (tDays > 0 && tMonths === 0) || tMonths <= 1);
+    const currentPaid = Number(loan.emisPaid) || 0;
+    const newPaidCount = currentPaid + 1;
+    const totalEmis = Number(loan.totalEmis) || (tMonths > 0 ? tMonths : 1);
+    const isFinalSettlement = isShortTerm || (newPaidCount >= totalEmis);
+    const nextDue = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000));
+
+    const appUpdateData: any = {
+      emisPaid: newPaidCount,
+      totalRepaidAmount: (Number(loan.totalRepaidAmount) || 0) + amt,
+      lastPaymentId: repItem.paymentId,
+      lastPaymentAt: now.toISOString(),
+      lastPaymentAmount: amt,
+      pendingEmiPaymentId: null,
+      pendingEmiAmount: null,
+      pendingEmiSubmittedAt: null,
+      pendingEmiRejectReason: null,
+    };
+
+    if (isFinalSettlement) {
+      appUpdateData.status = 'repaid';
+      appUpdateData.repaidAt = now.toISOString();
+    } else {
+      appUpdateData.nextEmiDueDate = nextDue.toISOString();
+      appUpdateData.dueDate = nextDue.toISOString();
+    }
+
+    try {
+      if (repItem.id) {
+        await updateDoc(doc(db, 'repayments', repItem.id), {
+          status: 'verified',
+          verifiedAt: now.toISOString(),
+          verifiedBy: 'admin@gmail.com',
+          isFinalSettlement,
+        });
+      }
+      await updateDoc(doc(db, 'applications', loanId), appUpdateData);
+    } catch (err) {
+      console.warn("Approve EMI repayment error:", err);
+    }
+
+    setApplications(prev => prev.map(a => a.id === loanId ? { ...a, ...appUpdateData } : a));
+    setRepaymentsList(prev => prev.map(r => r.id === repItem.id ? { ...r, status: 'verified', verifiedAt: now.toISOString() } : r));
+    alert(`✓ EMI payment of ₹${amt.toLocaleString('en-IN')} approved successfully! Loan balance updated.`);
+  };
+
+  // 2.4 Admin Reject EMI Repayment
+  const handleRejectEmiRepayment = async (repItem: any) => {
+    const reason = window.prompt(`Enter EMI rejection reason for ${repItem.userName || 'Borrower'} (UTR: ${repItem.paymentId}):`, "Payment not received in bank account / Invalid UTR reference");
+    if (reason === null) return;
+
+    const loanId = repItem.applicationId;
+    const now = new Date();
+
+    try {
+      if (repItem.id) {
+        await updateDoc(doc(db, 'repayments', repItem.id), {
+          status: 'rejected',
+          rejectedReason: reason,
+          rejectedAt: now.toISOString(),
+          rejectedBy: 'admin@gmail.com',
+        });
+      }
+      if (loanId) {
+        await updateDoc(doc(db, 'applications', loanId), {
+          pendingEmiPaymentId: null,
+          pendingEmiRejectReason: reason,
+        });
+      }
+    } catch (err) {
+      console.warn("Reject EMI repayment error:", err);
+    }
+
+    if (loanId) {
+      setApplications(prev => prev.map(a => a.id === loanId ? { ...a, pendingEmiPaymentId: undefined, pendingEmiRejectReason: reason } : a));
+    }
+    setRepaymentsList(prev => prev.map(r => r.id === repItem.id ? { ...r, status: 'rejected', rejectedReason: reason } : r));
+    alert(`✕ EMI payment rejected. User notified in app.`);
+  };
+
   // 3. Admin Disburse Funds (Initializes EMI schedule and auto-due tracking)
   const handleDisburse = async (id: string, appItem: any) => {
     const bank = appItem.bankName || 'Bank';
@@ -939,6 +1101,7 @@ export default function App() {
                 { id: 'all', label: 'All' },
                 { id: 'under_review', label: 'Under Review' },
                 { id: 'approved', label: 'Approved (Waiting ₹1)' },
+                { id: 'acceptance_submitted', label: `⚡ ₹1 Pending Review (${applications.filter(a => a.status === 'acceptance_submitted').length})` },
                 { id: 'acceptance_done', label: '₹1 Verified (Disburse)' },
                 { id: 'disbursed', label: 'Disbursed' },
                 { id: 'rejected', label: 'Rejected' },
@@ -953,7 +1116,7 @@ export default function App() {
                     fontSize: '13px',
                     fontWeight: 500,
                     cursor: 'pointer',
-                    backgroundColor: statusFilter === tab.id ? '#1E3A8A' : '#FFFFFF',
+                    backgroundColor: statusFilter === tab.id ? (tab.id === 'acceptance_submitted' ? '#D97706' : '#1E3A8A') : '#FFFFFF',
                     color: statusFilter === tab.id ? '#FFFFFF' : '#475569',
                     boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
                   }}
@@ -1011,7 +1174,7 @@ export default function App() {
                     const isAccepted = app.status === 'acceptance_done' || app.status === 'autopay_done';
 
                     return (
-                      <tr key={app.id} style={{ borderBottom: '1px solid #f1f5f9', background: app.isBlocked ? '#fef2f2' : 'transparent' }}>
+                      <tr key={app.id} style={{ borderBottom: '1px solid #f1f5f9', background: app.isBlocked ? '#fef2f2' : (app.status === 'acceptance_submitted' ? '#fffbeb' : 'transparent') }}>
                         {/* Applicant & KYC */}
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
@@ -1100,11 +1263,12 @@ export default function App() {
                             fontWeight: 'bold',
                             display: 'inline-block',
                             marginBottom: '4px',
-                            background: app.status === 'disbursed' ? '#dcfce7' : isAccepted ? '#e0f2fe' : app.status === 'approved' ? '#fef9c3' : app.status === 'rejected' ? '#fee2e2' : '#fffbeb',
-                            color: app.status === 'disbursed' ? '#15803d' : isAccepted ? '#0369a1' : app.status === 'approved' ? '#a16207' : app.status === 'rejected' ? '#b91c1c' : '#b45309'
+                            background: app.status === 'disbursed' ? '#dcfce7' : isAccepted ? '#e0f2fe' : app.status === 'acceptance_submitted' ? '#fef3c7' : app.status === 'approved' ? '#fef9c3' : app.status === 'rejected' ? '#fee2e2' : '#fffbeb',
+                            color: app.status === 'disbursed' ? '#15803d' : isAccepted ? '#0369a1' : app.status === 'acceptance_submitted' ? '#d97706' : app.status === 'approved' ? '#a16207' : app.status === 'rejected' ? '#b91c1c' : '#b45309'
                           }}>
                             {app.status === 'under_review' && '⏳ Under Review'}
                             {app.status === 'approved' && '✓ Approved (Waiting ₹1)'}
+                            {app.status === 'acceptance_submitted' && '⚡ ₹1 Paid (Needs Review)'}
                             {isAccepted && '⚡ ₹1 Verified (Accepted)'}
                             {app.status === 'disbursed' && '💰 Disbursed (Active)'}
                             {app.status === 'repaid' && '✓ Repaid & Closed'}
@@ -1112,13 +1276,13 @@ export default function App() {
                           </span>
                           {(app.acceptancePaymentId || app.razorpayPaymentId) && (
                             <div style={{ fontSize: '11px', color: '#64748b' }}>
-                              Ref: <code>{app.acceptancePaymentId || app.razorpayPaymentId}</code>
+                              UTR: <code style={{ fontWeight: 700, color: '#1E3A8A' }}>{app.acceptancePaymentId || app.razorpayPaymentId}</code>
                             </div>
                           )}
                         </td>
 
                         {/* Admin Strict Action */}
-                        <td style={{ minWidth: '190px' }}>
+                        <td style={{ minWidth: '200px' }}>
                           {app.status === 'under_review' && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                               <div style={{ background: '#F8FAFC', padding: '6px 8px', borderRadius: '6px', border: '1px solid #CBD5E1' }}>
@@ -1174,7 +1338,29 @@ export default function App() {
                           {app.status === 'approved' && (
                             <div style={{ fontSize: '12px', color: '#0369A1', background: '#E0F2FE', padding: '8px', borderRadius: '6px', border: '1px solid #BAE6FD' }}>
                               <div style={{ fontWeight: 700, marginBottom: '2px' }}>✓ Approved @ {app.interestRate}%</div>
-                              <div style={{ fontSize: '11px', color: '#0284C7' }}>Waiting for user to pay ₹1 acceptance fee in App</div>
+                              <div style={{ fontSize: '11px', color: '#0284C7' }}>Waiting for user to pay ₹1 & submit UTR</div>
+                            </div>
+                          )}
+
+                          {app.status === 'acceptance_submitted' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: '#FFFBEB', padding: '8px', borderRadius: '8px', border: '1px solid #FDE68A' }}>
+                              <div style={{ fontSize: '11px', color: '#92400E', fontWeight: 700 }}>
+                                ⚡ User Paid ₹1 (Review UTR):
+                              </div>
+                              <div style={{ background: '#FFFFFF', padding: '4px 6px', borderRadius: '4px', border: '1px solid #CBD5E1', fontSize: '12px' }}>
+                                <span style={{ fontSize: '10px', color: '#64748B' }}>Submitted UTR:</span><br />
+                                <code style={{ fontWeight: 800, color: '#1E3A8A', fontSize: '12px' }}>{app.acceptancePaymentId || app.razorpayPaymentId || 'N/A'}</code>
+                              </div>
+                              <button
+                                onClick={() => handleApproveAcceptance(app.id, app)}
+                                style={{ background: '#16a34a', color: 'white', padding: '6px 8px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, fontSize: '11px' }}>
+                                ✓ Payment Received (Approve)
+                              </button>
+                              <button
+                                onClick={() => handleRejectAcceptance(app.id, app)}
+                                style={{ background: '#dc2626', color: 'white', padding: '5px 8px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '11px' }}>
+                                ✕ Reject ₹1 Payment
+                              </button>
                             </div>
                           )}
 
@@ -1293,16 +1479,108 @@ export default function App() {
             </div>
           </div>
 
+          {/* Pending Payment Approvals Queue (Action Required) */}
+          {repaymentsList.filter(r => r.status === 'pending_verification').length > 0 && (
+            <div style={{ background: '#FFFBEB', borderRadius: '12px', border: '2px solid #F59E0B', padding: '18px 20px', marginBottom: '24px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.08)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#D97706', display: 'inline-block', boxShadow: '0 0 8px #D97706' }}></span>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#92400E' }}>
+                    🚨 Pending Payment Approvals ({repaymentsList.filter(r => r.status === 'pending_verification').length}) — Action Required
+                  </h3>
+                </div>
+                <span style={{ fontSize: '12px', color: '#92400E', fontWeight: 700, background: '#FDE68A', padding: '4px 12px', borderRadius: '12px' }}>
+                  Verify Received Payments in Bank / Razorpay
+                </span>
+              </div>
+              <div style={{ overflowX: 'auto', background: 'white', borderRadius: '8px', border: '1px solid #FDE68A' }}>
+                <table border={0} cellPadding={10} style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ background: '#FEF3C7', color: '#78350F', borderBottom: '2px solid #FDE68A' }}>
+                      <th>Submission Time</th>
+                      <th>Borrower & Phone</th>
+                      <th>Payment Type</th>
+                      <th>Amount Received</th>
+                      <th>Submitted UTR / Ref</th>
+                      <th style={{ textAlign: 'center' }}>Admin Action (Approve / Reject)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {repaymentsList.filter(r => r.status === 'pending_verification').map((rep, idx) => (
+                      <tr key={rep.id || idx} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                        <td style={{ color: '#64748B', fontSize: '12px' }}>
+                          {rep.paidAt?.toDate ? rep.paidAt.toDate().toLocaleString('en-IN') : (rep.paidAt ? new Date(rep.paidAt).toLocaleString('en-IN') : 'Just now')}
+                        </td>
+                        <td>
+                          <b>{rep.userName || 'Borrower'}</b><br />
+                          <span style={{ fontSize: '11px', color: '#64748B' }}>📱 +91 {rep.userPhone}</span>
+                        </td>
+                        <td>
+                          <span style={{ background: rep.type === 'acceptance_fee' ? '#E0F2FE' : '#ECFDF5', color: rep.type === 'acceptance_fee' ? '#0369A1' : '#047857', padding: '3px 8px', borderRadius: '4px', fontWeight: 700, fontSize: '11px' }}>
+                            {rep.type === 'acceptance_fee' ? '⚡ ₹1 Acceptance Fee' : `✓ EMI #${rep.emiNumber || 1} Repayment`}
+                          </span>
+                        </td>
+                        <td>
+                          <b style={{ color: '#059669', fontSize: '15px' }}>₹{Number(rep.amount).toLocaleString('en-IN')}</b>
+                        </td>
+                        <td>
+                          <code style={{ fontWeight: 800, color: '#1E3A8A', background: '#F1F5F9', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', border: '1px solid #CBD5E1' }}>
+                            {rep.paymentId}
+                          </code>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                            {rep.type === 'acceptance_fee' ? (
+                              <>
+                                <button
+                                  onClick={() => handleApproveAcceptance(rep.applicationId, rep)}
+                                  style={{ background: '#16A34A', color: 'white', padding: '6px 12px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}
+                                >
+                                  ✓ Payment Received (Approve)
+                                </button>
+                                <button
+                                  onClick={() => handleRejectAcceptance(rep.applicationId, rep)}
+                                  style={{ background: '#DC2626', color: 'white', padding: '6px 10px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '12px' }}
+                                >
+                                  ✕ Reject
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => handleApproveEmiRepayment(rep)}
+                                  style={{ background: '#16A34A', color: 'white', padding: '6px 12px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}
+                                >
+                                  ✓ Payment Received (Approve EMI)
+                                </button>
+                                <button
+                                  onClick={() => handleRejectEmiRepayment(rep)}
+                                  style={{ background: '#DC2626', color: 'white', padding: '6px 10px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '12px' }}
+                                >
+                                  ✕ Reject
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* Real-time Automated Repayments Live Feed Banner */}
           {repaymentsList.length > 0 && (
             <div style={{ background: '#FFFFFF', borderRadius: '12px', border: '1px solid #BBF7D0', padding: '18px 20px', marginBottom: '24px', boxShadow: '0 2px 4px rgba(0,0,0,0.04)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#10B981', display: 'inline-block', boxShadow: '0 0 8px #10B981' }}></span>
-                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#065F46' }}>⚡ Live Automated Repayment Stream (Real-Time Sync from App)</h3>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#065F46' }}>⚡ Repayment Records History & Audit Log</h3>
                 </div>
                 <span style={{ fontSize: '12px', color: '#047857', fontWeight: 600, background: '#DCFCE7', padding: '3px 10px', borderRadius: '12px' }}>
-                  {repaymentsList.length} Payments Synced
+                  {repaymentsList.length} Payments Recorded
                 </span>
               </div>
               <div style={{ overflowX: 'auto' }}>
@@ -1315,11 +1593,11 @@ export default function App() {
                       <th>Base EMI</th>
                       <th>Penalty Paid</th>
                       <th>Total Received</th>
-                      <th>Milestone & Sync Status</th>
+                      <th>Verification Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {repaymentsList.slice(0, 5).map((rep, idx) => (
+                    {repaymentsList.slice(0, 10).map((rep, idx) => (
                       <tr key={rep.id || idx} style={{ borderBottom: '1px solid #F1F5F9' }}>
                         <td style={{ color: '#64748B' }}>
                           {rep.paidAt?.toDate ? rep.paidAt.toDate().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : (rep.paidAt ? new Date(rep.paidAt).toLocaleTimeString('en-IN') : 'Just now')}
@@ -1341,8 +1619,15 @@ export default function App() {
                           <b style={{ color: '#059669', fontSize: '13px' }}>₹{Number(rep.amount).toLocaleString('en-IN')}</b>
                         </td>
                         <td>
-                          <span style={{ background: '#DCFCE7', color: '#15803D', padding: '2px 8px', borderRadius: '10px', fontWeight: 700, fontSize: '11px' }}>
-                            {rep.isFinalSettlement ? '🏆 Loan Closed' : (rep.type === 'acceptance_fee' ? '⚡ ₹1 Acceptance' : `✓ EMI #${rep.emiNumber || 1}`)} • Automated
+                          <span style={{
+                            background: rep.status === 'pending_verification' ? '#FEF3C7' : rep.status === 'rejected' ? '#FEE2E2' : '#DCFCE7',
+                            color: rep.status === 'pending_verification' ? '#D97706' : rep.status === 'rejected' ? '#DC2626' : '#15803D',
+                            padding: '2px 8px',
+                            borderRadius: '10px',
+                            fontWeight: 700,
+                            fontSize: '11px'
+                          }}>
+                            {rep.status === 'pending_verification' ? '⏳ Pending Approval' : rep.status === 'rejected' ? `✕ Rejected: ${rep.rejectedReason || ''}` : (rep.isFinalSettlement ? '🏆 Loan Closed' : (rep.type === 'acceptance_fee' ? '⚡ ₹1 Verified' : `✓ EMI #${rep.emiNumber || 1} Verified`))}
                           </span>
                         </td>
                       </tr>
@@ -2119,6 +2404,16 @@ export default function App() {
                         ✕ Reject
                       </button>
                     </>
+                  )}
+                  {detailedApp.status === 'acceptance_submitted' && (
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <button onClick={() => handleApproveAcceptance(detailedApp.id, detailedApp)} style={{ background: '#16A34A', color: 'white', padding: '8px 18px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}>
+                        ✓ Payment Received (Approve ₹1)
+                      </button>
+                      <button onClick={() => handleRejectAcceptance(detailedApp.id, detailedApp)} style={{ background: '#DC2626', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}>
+                        ✕ Reject ₹1
+                      </button>
+                    </div>
                   )}
                   {isAccepted && (
                     <button onClick={() => handleDisburse(detailedApp.id, detailedApp)} style={{ background: '#2563EB', color: 'white', padding: '8px 18px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, boxShadow: '0 2px 6px rgba(37,99,235,0.35)' }}>

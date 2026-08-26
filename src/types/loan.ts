@@ -1,6 +1,7 @@
 export type ApplicationStatus =
   | 'under_review'
   | 'approved'
+  | 'acceptance_submitted'
   | 'acceptance_done'
   | 'autopay_done'
   | 'disbursed'
@@ -9,14 +10,29 @@ export type ApplicationStatus =
 
 export interface LoanRepaymentRecord {
   id?: string;
+  applicationId?: string;
   paymentId: string;
   amount: number;
-  emiNumber: number;
-  paidAt: string | any;
-  method?: string;
+  baseEmi?: number;
   penaltyPaid?: number;
   penaltyWaived?: number;
+  emiNumber?: number;
+  totalEmis?: number;
+  paidAt: string | any;
+  method?: string;
+  paymentMode?: string;
   notes?: string;
+  userName?: string;
+  userPhone?: string;
+  status?: 'pending_verification' | 'verified' | 'rejected';
+  type?: 'acceptance_fee' | 'emi_repayment' | string;
+  isFinalSettlement?: boolean;
+  rejectedReason?: string;
+  rejectedAt?: string | any;
+  rejectedBy?: string;
+  verifiedAt?: string | any;
+  verifiedBy?: string;
+  collectedBy?: string;
 }
 
 export interface LoanApplication {
@@ -64,7 +80,13 @@ export interface LoanApplication {
   autoPayConsentAccepted?: boolean;
   acceptanceFeePaid?: boolean;
   acceptancePaymentId?: string;
+  acceptanceSubmittedAt?: string | any;
   acceptancePaidAt?: string | any;
+  acceptanceRejectReason?: string;
+  pendingEmiPaymentId?: string;
+  pendingEmiAmount?: number;
+  pendingEmiSubmittedAt?: string | any;
+  pendingEmiRejectReason?: string;
   razorpayPaymentId?: string;
   razorpayOrderId?: string;
   rejectionReason?: string;
@@ -81,6 +103,7 @@ export interface LoanApplication {
   repaidAt?: string | any;
   lastPaymentId?: string;
   lastPaymentAt?: string | any;
+  lastPaymentAmount?: number;
   repayments?: LoanRepaymentRecord[];
   createdAt?: any;
 }
