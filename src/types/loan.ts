@@ -1,4 +1,23 @@
-export type ApplicationStatus = 'under_review' | 'approved' | 'autopay_done' | 'disbursed' | 'rejected';
+export type ApplicationStatus =
+  | 'under_review'
+  | 'approved'
+  | 'acceptance_done'
+  | 'autopay_done'
+  | 'disbursed'
+  | 'repaid'
+  | 'rejected';
+
+export interface LoanRepaymentRecord {
+  id?: string;
+  paymentId: string;
+  amount: number;
+  emiNumber: number;
+  paidAt: string | any;
+  method?: string;
+  penaltyPaid?: number;
+  penaltyWaived?: number;
+  notes?: string;
+}
 
 export interface LoanApplication {
   id: string;
@@ -20,8 +39,12 @@ export interface LoanApplication {
   amount: number;
   interestRate: number;
   tenureMonths: number;
+  tenureDays?: number;
+  tenureDisplay?: string;
   monthlyEmi: number;
   totalRepayment: number;
+  processingFee?: number;
+  netDisbursalAmount?: number;
 
   // Document URLs
   panUrl?: string;
@@ -29,12 +52,19 @@ export interface LoanApplication {
   incomeProofUrl?: string;
   bankStatementUrl?: string;
   proofUrl?: string;
+  selfieUrl?: string;
+  housePhotoUrl?: string;
+  homePhotoUrl?: string;
 
-  // Workflow & Status
+  // Workflow, Acceptance & Disbursal Status
   status: ApplicationStatus;
   isBlocked: boolean;
   rbiConsentAccepted: boolean;
+  userConsentApproved?: boolean;
   autoPayConsentAccepted?: boolean;
+  acceptanceFeePaid?: boolean;
+  acceptancePaymentId?: string;
+  acceptancePaidAt?: string | any;
   razorpayPaymentId?: string;
   razorpayOrderId?: string;
   rejectionReason?: string;
@@ -42,5 +72,15 @@ export interface LoanApplication {
   approvedAt?: string;
   disbursedBy?: string;
   disbursedAt?: string;
+  dueDate?: string | any;
+  nextEmiDueDate?: string | any;
+  emisPaid?: number;
+  totalEmis?: number;
+  penaltyPerDay?: number;
+  penaltyWaived?: number;
+  repaidAt?: string | any;
+  lastPaymentId?: string;
+  lastPaymentAt?: string | any;
+  repayments?: LoanRepaymentRecord[];
   createdAt?: any;
 }

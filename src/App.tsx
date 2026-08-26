@@ -1,6 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, onSnapshot, doc, updateDoc, deleteDoc, getDocs, query, where, writeBatch, setDoc } from 'firebase/firestore';
+import {
+  getFirestore,
+  collection,
+  onSnapshot,
+  doc,
+  updateDoc,
+  deleteDoc,
+  getDocs,
+  query,
+  where,
+  writeBatch,
+  setDoc,
+  addDoc,
+} from 'firebase/firestore';
+
+const RAZORPAY_ME_LINK = 'https://razorpay.me/@mrugeshjaykumarchauhan';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCzvSmn2A_kSLrDfA3frRzj2WWwFs7p3VQ",
@@ -13,91 +28,6 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-
-// Initial sample data in case Firestore is connecting or empty
-const initialSampleApps = [
-  {
-    id: 'demo-app-1',
-    fullName: 'Rahul Sharma',
-    userPhone: '9876543210',
-    userEmail: 'rahul.sharma@gmail.com',
-    aadhaarNumber: '234567891234',
-    panNumber: 'ABCPS1234K',
-    employmentType: 'salaried',
-    monthlyIncome: 45000,
-    bankName: 'HDFC Bank',
-    accountNumber: '50100234567890',
-    ifscCode: 'HDFC0001234',
-    accountHolderName: 'Rahul Sharma',
-    amount: 50000,
-    monthlyEmi: 4490.50,
-    interestRate: 14.0,
-    tenureMonths: 12,
-    totalRepayment: 53886.00,
-    rbiConsentAccepted: true,
-    autoPayConsentAccepted: true,
-    razorpayPaymentId: 'pay_Nz82Kx9281aL',
-    panUrl: 'https://i.ibb.co/vzZ8q6K/sample-pan.jpg',
-    aadhaarUrl: 'https://i.ibb.co/vzZ8q6K/sample-pan.jpg',
-    incomeProofUrl: 'https://i.ibb.co/vzZ8q6K/sample-pan.jpg',
-    bankStatementUrl: 'https://i.ibb.co/vzZ8q6K/sample-pan.jpg',
-    status: 'autopay_done',
-    isBlocked: false,
-    createdAt: '2026-08-20',
-  },
-  {
-    id: 'demo-app-2',
-    fullName: 'Pooja Verma',
-    userPhone: '9123456780',
-    userEmail: 'pooja.verma@outlook.com',
-    aadhaarNumber: '876543219876',
-    panNumber: 'BKRPA9876M',
-    employmentType: 'business',
-    monthlyIncome: 65000,
-    bankName: 'State Bank of India',
-    accountNumber: '304928192834',
-    ifscCode: 'SBIN0004567',
-    accountHolderName: 'Pooja Verma',
-    amount: 30000,
-    monthlyEmi: 5200.00,
-    interestRate: 16.0,
-    tenureMonths: 6,
-    totalRepayment: 31200.00,
-    rbiConsentAccepted: true,
-    autoPayConsentAccepted: false,
-    razorpayPaymentId: '',
-    panUrl: 'https://i.ibb.co/vzZ8q6K/sample-pan.jpg',
-    aadhaarUrl: 'https://i.ibb.co/vzZ8q6K/sample-pan.jpg',
-    incomeProofUrl: 'https://i.ibb.co/vzZ8q6K/sample-pan.jpg',
-    bankStatementUrl: 'https://i.ibb.co/vzZ8q6K/sample-pan.jpg',
-    status: 'under_review',
-    isBlocked: false,
-    createdAt: '2026-08-22',
-  },
-  {
-    id: 'demo-app-3',
-    fullName: 'Amit Kumar',
-    userPhone: '9988776655',
-    userEmail: 'amit.k@yahoo.com',
-    aadhaarNumber: '567890123456',
-    panNumber: 'DFGPK3456L',
-    employmentType: 'salaried',
-    monthlyIncome: 55000,
-    bankName: 'ICICI Bank',
-    accountNumber: '001205001234',
-    ifscCode: 'ICIC0000012',
-    accountHolderName: 'Amit Kumar',
-    amount: 75000,
-    monthlyEmi: 6720.00,
-    interestRate: 13.5,
-    tenureMonths: 12,
-    totalRepayment: 80640.00,
-    rbiConsentAccepted: true,
-    autoPayConsentAccepted: true,
-    razorpayPaymentId: 'pay_Pq71Kz1928bM',
-    createdAt: '2026-08-24',
-  }
-];
 
 function calculateAdminLoan(principal: any, annualRate: any, tenureMonths: any, tenureDays?: any) {
   const p = Number(principal) || 0;
@@ -114,7 +44,6 @@ function calculateAdminLoan(principal: any, annualRate: any, tenureMonths: any, 
 
   if (isDays) {
     const days = tDays > 0 ? tDays : 7;
-    // Flat % interest for short-term bullet loans (e.g. 10% on ₹1,000 = ₹100 interest => ₹1,100 repayment)
     const totalInterest = Math.round(p * (r / 100));
     const totalRepayment = p + totalInterest;
     return {
@@ -145,7 +74,6 @@ function calculateAdminLoan(principal: any, annualRate: any, tenureMonths: any, 
         frequencyText: 'Single 1-Month Repayment'
       };
     } else {
-      // Annualized percentage across months: Total Interest = P * (r/100) * (months / 12)
       const totalInterest = Math.round(p * (r / 100) * (months / 12));
       const totalRepayment = p + totalInterest;
       const emi = Math.round(totalRepayment / months);
@@ -163,23 +91,110 @@ function calculateAdminLoan(principal: any, annualRate: any, tenureMonths: any, 
   }
 }
 
+// Compute dynamic overdue days, penalty (@ ₹100/day), and total due
+function computeLoanCollectionMetrics(app: any) {
+  const emi = Number(app.monthlyEmi) || 0;
+  if (app.status !== 'disbursed') {
+    return {
+      dueDate: null,
+      dueDateFormatted: '—',
+      overdueDays: 0,
+      isOverdue: false,
+      penalty: 0,
+      rawPenalty: 0,
+      penaltyWaived: 0,
+      totalDue: emi,
+      statusLabel: app.status === 'repaid' ? 'Paid & Settled' : 'Not Disbursed',
+    };
+  }
+
+  let dueTimestamp = null;
+  if (app.nextEmiDueDate?.toMillis) {
+    dueTimestamp = app.nextEmiDueDate.toMillis();
+  } else if (app.nextEmiDueDate) {
+    dueTimestamp = new Date(app.nextEmiDueDate).getTime();
+  } else if (app.dueDate?.toMillis) {
+    dueTimestamp = app.dueDate.toMillis();
+  } else if (app.dueDate) {
+    dueTimestamp = new Date(app.dueDate).getTime();
+  } else {
+    const baseMillis = app.disbursedAt ? new Date(app.disbursedAt).getTime() : (app.createdAt?.toMillis ? app.createdAt.toMillis() : Date.now());
+    const daysToAdd = app.tenureDays > 0 ? app.tenureDays : (app.tenureMonths > 0 ? 30 : 7);
+    dueTimestamp = baseMillis + (daysToAdd * 24 * 60 * 60 * 1000);
+  }
+
+  const dueDate = new Date(dueTimestamp);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dueCalendar = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate()).getTime();
+  const diffDays = Math.floor((today - dueCalendar) / (1000 * 60 * 60 * 24));
+
+  const overdueDays = diffDays > 0 ? diffDays : 0;
+  const isOverdue = overdueDays > 0;
+  const penaltyRate = Number(app.penaltyPerDay) || 100;
+  const penalty = overdueDays * penaltyRate;
+  const penaltyWaived = Number(app.penaltyWaived) || 0;
+  const effectivePenalty = Math.max(0, penalty - penaltyWaived);
+  const totalDue = Math.round(emi + effectivePenalty);
+
+  const dueDateFormatted = dueDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  let statusLabel = 'On Track';
+  if (isOverdue) {
+    statusLabel = `Overdue (${overdueDays}d Late)`;
+  } else if (diffDays === 0) {
+    statusLabel = 'Due Today';
+  } else if (diffDays >= -3) {
+    statusLabel = `Due in ${Math.abs(diffDays)}d`;
+  }
+
+  return {
+    dueDate,
+    dueDateFormatted,
+    overdueDays,
+    isOverdue,
+    penalty: effectivePenalty,
+    rawPenalty: penalty,
+    penaltyWaived,
+    totalDue,
+    statusLabel,
+  };
+}
+
 export default function App() {
-  // Authentication State (Always show Login Screen on fresh session)
+  // Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState('');
 
-  // Navigation View State ('applications' | 'users')
-  const [activeView, setActiveView] = useState<'applications' | 'users'>('applications');
+  // Navigation View State ('applications' | 'collections' | 'users')
+  const [activeView, setActiveView] = useState<'applications' | 'collections' | 'users'>('applications');
 
-  // Dashboard & Applications State
-  const [applications, setApplications] = useState<any[]>(initialSampleApps);
+  // Applications State
+  const [applications, setApplications] = useState<any[]>([]);
   const [adminRates, setAdminRates] = useState<Record<string, number>>({});
   const [selectedDoc, setSelectedDoc] = useState<{ title: string; url: string } | null>(null);
   const [detailedApp, setDetailedApp] = useState<any | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Live Repayments Stream State
+  const [repaymentsList, setRepaymentsList] = useState<any[]>([]);
+
+  // Collection Page State
+  const [collectionFilter, setCollectionFilter] = useState<'all' | 'overdue' | 'due_soon' | 'repaid'>('all');
+  const [collectionSearch, setCollectionSearch] = useState('');
+  const [recordingLoan, setRecordingLoan] = useState<any | null>(null);
+  const [recordAmount, setRecordAmount] = useState<number>(0);
+  const [recordUtr, setRecordUtr] = useState<string>('');
+  const [recordMode, setRecordMode] = useState<string>('razorpay');
+  const [recordWaived, setRecordWaived] = useState<number>(0);
+  const [recordNotes, setRecordNotes] = useState<string>('');
+
+  // Waive Penalty Modal State
+  const [waivingLoan, setWaivingLoan] = useState<any | null>(null);
+  const [waiveAmount, setWaiveAmount] = useState<number>(0);
 
   // Users Directory Search State
   const [registeredUsers, setRegisteredUsers] = useState<any[]>([]);
@@ -191,7 +206,8 @@ export default function App() {
     if (!isAuthenticated) return;
 
     try {
-      const unsub = onSnapshot(collection(db, 'applications'), (snapshot) => {
+      // 1. Applications Stream
+      const unsubApps = onSnapshot(collection(db, 'applications'), (snapshot) => {
         if (!snapshot.empty) {
           const liveDocs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
           liveDocs.sort((a: any, b: any) => {
@@ -205,6 +221,22 @@ export default function App() {
         console.warn("Firestore applications listener fallback: ", error.message);
       });
 
+      // 2. Automated Repayments Live Stream
+      const unsubRepayments = onSnapshot(collection(db, 'repayments'), (snapshot) => {
+        if (!snapshot.empty) {
+          const liveRepayments = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+          liveRepayments.sort((a: any, b: any) => {
+            const tA = a.paidAt?.toMillis ? a.paidAt.toMillis() : (a.paidAt ? new Date(a.paidAt).getTime() : 0);
+            const tB = b.paidAt?.toMillis ? b.paidAt.toMillis() : (b.paidAt ? new Date(b.paidAt).getTime() : 0);
+            return tB - tA;
+          });
+          setRepaymentsList(liveRepayments);
+        }
+      }, (error) => {
+        console.warn("Firestore repayments listener fallback: ", error.message);
+      });
+
+      // 3. Registered Users Stream
       const unsubUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
         if (!snapshot.empty) {
           const liveUsers = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -215,7 +247,8 @@ export default function App() {
       });
 
       return () => {
-        unsub();
+        unsubApps();
+        unsubRepayments();
         unsubUsers();
       };
     } catch (e) {
@@ -239,12 +272,12 @@ export default function App() {
     localStorage.removeItem('loanbazar_admin_auth');
   };
 
-  // 1. Admin Approve Loan with Specific Custom Percentage
+  // 1. Admin Approve Loan Offer
   const handleApprove = async (id: string, name: string, appItem: any, specificRate?: number) => {
     const chosenRate = specificRate !== undefined ? specificRate : (adminRates[id] !== undefined ? adminRates[id] : (Number(appItem.interestRate) || 14.0));
     const calc = calculateAdminLoan(appItem.amount, chosenRate, appItem.tenureMonths, appItem.tenureDays);
     
-    const confirmMsg = `CONFIRM APPROVAL:\n\nApplicant: ${name}\nSanctioned Amount: ₹${Number(appItem.amount).toLocaleString('en-IN')}\nApproved Rate: ${chosenRate}% p.a.\nTenure: ${calc.tenureDisplay}\n${calc.isDays ? 'Bullet Due' : 'Monthly EMI'}: ₹${calc.emi.toLocaleString('en-IN')}\nTotal Repay: ₹${calc.totalRepayment.toLocaleString('en-IN')}\nNet Disbursal: ₹${calc.netDisbursal.toLocaleString('en-IN')}\n\nApprove this customized loan offer for user acceptance?`;
+    const confirmMsg = `CONFIRM APPROVAL:\n\nApplicant: ${name}\nSanctioned Amount: ₹${Number(appItem.amount).toLocaleString('en-IN')}\nApproved Rate: ${chosenRate}% p.a.\nTenure: ${calc.tenureDisplay}\n${calc.isDays ? 'Bullet Due' : 'Monthly EMI'}: ₹${calc.emi.toLocaleString('en-IN')}\nTotal Repay: ₹${calc.totalRepayment.toLocaleString('en-IN')}\nNet Disbursal: ₹${calc.netDisbursal.toLocaleString('en-IN')}\n\nApprove offer? The user will be requested to pay ₹1 acceptance fee.`;
     if (!window.confirm(confirmMsg)) return;
 
     const updateData = {
@@ -259,6 +292,7 @@ export default function App() {
       approvedBy: 'admin@gmail.com',
       approvedAt: new Date().toISOString(),
       userConsentApproved: false,
+      acceptanceFeePaid: false,
     };
     try {
       await updateDoc(doc(db, 'applications', id), updateData);
@@ -268,7 +302,6 @@ export default function App() {
     setApplications(prev => prev.map(a => a.id === id ? { ...a, ...updateData } : a));
     if (detailedApp?.id === id) setDetailedApp((prev: any) => ({ ...prev, ...updateData }));
   };
-
 
   // 2. Admin Decline / Reject Loan
   const handleReject = async (id: string, name: string) => {
@@ -289,20 +322,32 @@ export default function App() {
     if (detailedApp?.id === id) setDetailedApp((prev: any) => ({ ...prev, ...updateData }));
   };
 
-  // 3. Admin Disburse Funds
+  // 3. Admin Disburse Funds (Initializes EMI schedule and auto-due tracking)
   const handleDisburse = async (id: string, appItem: any) => {
     const bank = appItem.bankName || 'Bank';
     const acc = appItem.accountNumber || '';
     const ifsc = appItem.ifscCode || '';
-    const amount = appItem.amount || 0;
+    const amount = Number(appItem.netDisbursalAmount) || Number(appItem.amount) || 0;
 
-    const confirmMsg = `CONFIRM DISBURSAL:\n\nTransfer ₹${amount.toLocaleString('en-IN')} to:\nAccount Holder: ${appItem.accountHolderName || appItem.fullName}\nBank: ${bank}\nAccount No: ${acc}\nIFSC: ${ifsc}\n\nMark this loan as Disbursed?`;
+    const confirmMsg = `CONFIRM DISBURSAL:\n\nTransfer ₹${amount.toLocaleString('en-IN')} to:\nAccount Holder: ${appItem.accountHolderName || appItem.fullName}\nBank: ${bank}\nAccount No: ${acc}\nIFSC: ${ifsc}\n\nMark this loan as Disbursed and activate automated EMI schedule?`;
     if (!window.confirm(confirmMsg)) return;
+
+    const now = new Date();
+    const tDays = Number(appItem.tenureDays) || 0;
+    const tMonths = Number(appItem.tenureMonths) || 0;
+    const daysToAdd = tDays > 0 ? tDays : (tMonths > 0 ? 30 : 7);
+    const dueDate = new Date(now.getTime() + (daysToAdd * 24 * 60 * 60 * 1000));
 
     const updateData = {
       status: 'disbursed',
       disbursedBy: 'admin@gmail.com',
-      disbursedAt: new Date().toISOString(),
+      disbursedAt: now.toISOString(),
+      dueDate: dueDate.toISOString(),
+      nextEmiDueDate: dueDate.toISOString(),
+      emisPaid: 0,
+      totalEmis: tMonths > 0 ? tMonths : 1,
+      penaltyPerDay: 100,
+      penaltyWaived: 0,
     };
     try {
       await updateDoc(doc(db, 'applications', id), updateData);
@@ -313,16 +358,134 @@ export default function App() {
     if (detailedApp?.id === id) setDetailedApp((prev: any) => ({ ...prev, ...updateData }));
   };
 
-  // Global User Block/Unblock across all applications & registered user document
+  // 4. Admin Record EMI Collection Payment (Manual fallback if user pays via cash/IMPS)
+  const openRecordModal = (loan: any) => {
+    const metrics = computeLoanCollectionMetrics(loan);
+    setRecordingLoan(loan);
+    setRecordAmount(metrics.totalDue);
+    setRecordUtr(`pay_admin_${Date.now().toString().slice(-6)}`);
+    setRecordMode('razorpay');
+    setRecordWaived(0);
+    setRecordNotes('');
+  };
+
+  const submitRecordCollection = async () => {
+    if (!recordingLoan) return;
+    const loan = recordingLoan;
+    const tMonths = Number(loan.tenureMonths) || 0;
+    const tDays = Number(loan.tenureDays) || 0;
+    const isShortTerm = (tDays === 7 || tDays === 15 || (tDays > 0 && tMonths === 0) || tMonths <= 1);
+    const currentPaid = Number(loan.emisPaid) || 0;
+    const newPaidCount = currentPaid + 1;
+    const totalEmis = Number(loan.totalEmis) || (tMonths > 0 ? tMonths : 1);
+    const isFinalSettlement = isShortTerm || (newPaidCount >= totalEmis);
+
+    const now = new Date();
+    const nextDue = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000));
+
+    const updateData: any = {
+      emisPaid: newPaidCount,
+      lastPaymentId: recordUtr,
+      lastPaymentAt: now.toISOString(),
+      penaltyWaived: (Number(loan.penaltyWaived) || 0) + Number(recordWaived || 0),
+    };
+
+    if (isFinalSettlement) {
+      updateData.status = 'repaid';
+      updateData.repaidAt = now.toISOString();
+    } else {
+      updateData.nextEmiDueDate = nextDue.toISOString();
+    }
+
+    try {
+      const repaymentRecord = {
+        applicationId: loan.id,
+        paymentId: recordUtr,
+        amount: Number(recordAmount),
+        emiNumber: newPaidCount,
+        paymentMode: recordMode,
+        waivedPenalty: Number(recordWaived || 0),
+        notes: recordNotes,
+        userName: loan.fullName || 'Borrower',
+        userPhone: loan.userPhone || '',
+        collectedBy: 'admin@gmail.com',
+        paidAt: now.toISOString(),
+        status: 'verified',
+        isFinalSettlement,
+      };
+
+      await addDoc(collection(db, 'applications', loan.id, 'repayments'), repaymentRecord);
+      await addDoc(collection(db, 'repayments'), repaymentRecord);
+      await updateDoc(doc(db, 'applications', loan.id), updateData);
+    } catch (e) {
+      console.warn("Record payment fallback:", e);
+    }
+
+    setApplications(prev => prev.map(a => a.id === loan.id ? { ...a, ...updateData } : a));
+    setRecordingLoan(null);
+    alert(`✓ Payment of ₹${recordAmount.toLocaleString('en-IN')} recorded successfully! App has been updated in real-time.`);
+  };
+
+  // 5. Waive Penalty Action
+  const openWaiveModal = (loan: any) => {
+    const metrics = computeLoanCollectionMetrics(loan);
+    setWaivingLoan(loan);
+    setWaiveAmount(metrics.penalty);
+  };
+
+  const submitWaivePenalty = async () => {
+    if (!waivingLoan) return;
+    const loan = waivingLoan;
+    const newWaived = (Number(loan.penaltyWaived) || 0) + Number(waiveAmount);
+
+    try {
+      await updateDoc(doc(db, 'applications', loan.id), {
+        penaltyWaived: newWaived,
+      });
+    } catch (e) {
+      console.warn("Waive penalty error:", e);
+    }
+
+    setApplications(prev => prev.map(a => a.id === loan.id ? { ...a, penaltyWaived: newWaived } : a));
+    setWaivingLoan(null);
+    alert(`✓ ₹${waiveAmount.toLocaleString('en-IN')} penalty waived successfully.`);
+  };
+
+  // 6. WhatsApp Reminder Sender
+  const sendWhatsAppReminder = (loan: any) => {
+    const metrics = computeLoanCollectionMetrics(loan);
+    const phone = (loan.userPhone || loan.phone || '').replace(/\D/g, '');
+    if (!phone) {
+      alert("No valid phone number for this borrower.");
+      return;
+    }
+
+    const cleanPhone = phone.startsWith('91') ? phone : `91${phone}`;
+    const name = loan.fullName || 'Borrower';
+    const loanId = loan.id.substring(0, 8);
+    const emi = Number(loan.monthlyEmi).toLocaleString('en-IN');
+    const total = metrics.totalDue.toLocaleString('en-IN');
+    const dueDate = metrics.dueDateFormatted;
+
+    let overdueText = '';
+    if (metrics.isOverdue) {
+      overdueText = `\n⚠️ *STATUS: OVERDUE BY ${metrics.overdueDays} DAYS*\n• Late Penalty (@ ₹100/day): ₹${metrics.penalty.toLocaleString('en-IN')}`;
+    }
+
+    const message = `Namaste ${name},\n\nThis is an automated repayment alert from *Loan Bazar* for your Loan Account #${loanId}.\n\n📊 *Repayment Breakdown:*\n• Sanctioned Principal: ₹${Number(loan.amount).toLocaleString('en-IN')}\n• EMI Due Date: ${dueDate}\n• Base EMI Amount: ₹${emi}${overdueText}\n• *Total Amount Payable: ₹${total}*\n\n⚠️ *Note:* As per policy, late penalty of ₹100 per day is charged for delayed payments.\n\n💳 *Instant Repayment Link (Auto Amount Pre-fill):*\n${RAZORPAY_ME_LINK}?amount=${metrics.totalDue}\n\nYour repayment will be automatically recorded and verified in the app instantly.\n\nRegards,\n*Loan Bazar Credit & Collections Team*\n📞 +91 9016131681`;
+
+    const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+    window.open(waUrl, '_blank');
+  };
+
+  // Global User Block/Unblock
   const toggleBlockUser = async (phone: string, currentStatus: boolean) => {
     const action = currentStatus ? "Unblock" : "Block";
     if (!window.confirm(`Are you sure you want to ${action} user with phone ${phone}?`)) return;
 
     try {
-      // 1. Update user doc in 'users' collection
       await setDoc(doc(db, 'users', phone), { isBlocked: !currentStatus }, { merge: true });
 
-      // 2. Update all applications matching userPhone
       const q = query(collection(db, 'applications'), where('userPhone', '==', phone));
       const snaps = await getDocs(q);
       if (!snaps.empty) {
@@ -363,8 +526,6 @@ export default function App() {
 
   // Merge Registered Users and Loan Applicants
   const usersMap = new Map<string, any>();
-
-  // 1. Add all registered users from Firestore 'users' collection
   registeredUsers.forEach(u => {
     const key = (u.phone || u.id || u.email || '').toString().trim();
     if (!key) return;
@@ -385,7 +546,6 @@ export default function App() {
       totalAmount: 0,
       latestStatus: 'Registered (No Loan Form)',
       isBlocked: u.isBlocked || false,
-      rbiConsentAccepted: false,
       panUrl: null,
       aadhaarUrl: null,
       incomeProofUrl: null,
@@ -395,7 +555,6 @@ export default function App() {
     });
   });
 
-  // 2. Overlay / Merge application data
   applications.forEach(app => {
     const key = (app.userPhone || app.phone || app.fullName || app.id || '').toString().trim();
     if (!usersMap.has(key)) {
@@ -416,7 +575,6 @@ export default function App() {
         totalAmount: app.amount || 0,
         latestStatus: app.status,
         isBlocked: app.isBlocked || false,
-        rbiConsentAccepted: app.rbiConsentAccepted || false,
         panUrl: app.panUrl,
         aadhaarUrl: app.aadhaarUrl,
         incomeProofUrl: app.incomeProofUrl || app.proofUrl,
@@ -448,49 +606,97 @@ export default function App() {
   });
   const usersList = Array.from(usersMap.values());
 
-  // Filtered Users
-  const filteredUsers = usersList.filter(user => {
+  // Filtered lists
+  const filteredApps = applications.filter((app) => {
     const matchesSearch =
-      user.name.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
-      user.phone.includes(userSearchQuery) ||
-      user.email.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
-      user.pan.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
-      user.aadhaar.includes(userSearchQuery) ||
-      user.employmentType.toLowerCase().includes(userSearchQuery.toLowerCase());
-    
-    if (userFilter === 'active') return matchesSearch && !user.isBlocked;
-    if (userFilter === 'blocked') return matchesSearch && user.isBlocked;
-    return matchesSearch;
+      (app.fullName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (app.userPhone || '').includes(searchQuery) ||
+      (app.userEmail || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (app.panNumber || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (app.aadhaarNumber || '').includes(searchQuery) ||
+      (app.bankName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (app.accountNumber || '').includes(searchQuery) ||
+      (app.razorpayPaymentId || '').includes(searchQuery) ||
+      (app.acceptancePaymentId || '').includes(searchQuery);
+
+    const matchesStatus = statusFilter === 'all' ||
+      app.status === statusFilter ||
+      (statusFilter === 'acceptance_done' && (app.status === 'acceptance_done' || app.status === 'autopay_done'));
+
+    return matchesSearch && matchesStatus;
   });
 
-  // If not authenticated, render Login Screen
+  const filteredUsers = usersList.filter(u => {
+    const matchesSearch =
+      (u.name || '').toLowerCase().includes(userSearchQuery.toLowerCase()) ||
+      (u.phone || '').includes(userSearchQuery) ||
+      (u.email || '').toLowerCase().includes(userSearchQuery.toLowerCase()) ||
+      (u.pan || '').toLowerCase().includes(userSearchQuery.toLowerCase()) ||
+      (u.aadhaar || '').includes(userSearchQuery);
+
+    const matchesFilter = userFilter === 'all' ||
+      (userFilter === 'active' && !u.isBlocked) ||
+      (userFilter === 'blocked' && u.isBlocked);
+
+    return matchesSearch && matchesFilter;
+  });
+
+  // Collection List (Disbursed & Repaid loans)
+  const collectionList = applications
+    .filter(a => a.status === 'disbursed' || a.status === 'repaid')
+    .map(a => {
+      const metrics = computeLoanCollectionMetrics(a);
+      return { ...a, ...metrics };
+    })
+    .filter(a => {
+      const matchesSearch =
+        (a.fullName || '').toLowerCase().includes(collectionSearch.toLowerCase()) ||
+        (a.userPhone || '').includes(collectionSearch) ||
+        (a.id || '').includes(collectionSearch) ||
+        (a.panNumber || '').toLowerCase().includes(collectionSearch.toLowerCase());
+
+      if (!matchesSearch) return false;
+
+      if (collectionFilter === 'overdue') return a.status === 'disbursed' && a.isOverdue;
+      if (collectionFilter === 'due_soon') return a.status === 'disbursed' && !a.isOverdue;
+      if (collectionFilter === 'repaid') return a.status === 'repaid';
+      return true;
+    });
+
+  // Collection Aggregate KPIs
+  const activeDisbursedLoans = applications.filter(a => a.status === 'disbursed');
+  const totalBaseEmiDue = activeDisbursedLoans.reduce((sum, a) => sum + (Number(a.monthlyEmi) || 0), 0);
+  const totalAccruedPenalties = activeDisbursedLoans.reduce((sum, a) => sum + computeLoanCollectionMetrics(a).penalty, 0);
+  const totalCollectibleAmount = totalBaseEmiDue + totalAccruedPenalties;
+  const totalSettledCapital = applications.filter(a => a.status === 'repaid').reduce((sum, a) => sum + (Number(a.totalRepayment) || Number(a.amount) || 0), 0);
+  const overdueCount = activeDisbursedLoans.filter(a => computeLoanCollectionMetrics(a).isOverdue).length;
+
   if (!isAuthenticated) {
     return (
       <div style={{
-        minHeight: '100vh',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'linear-gradient(135deg, #0F172A 0%, #1E3A8A 100%)',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        padding: '20px'
+        minHeight: '100vh',
+        backgroundColor: '#0F172A',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
       }}>
         <div style={{
           backgroundColor: '#FFFFFF',
-          padding: '40px',
+          padding: '36px',
           borderRadius: '16px',
           width: '100%',
-          maxWidth: '420px',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)'
+          maxWidth: '400px',
+          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)'
         }}>
-          <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+          <div style={{ textAlign: 'center', marginBottom: '24px' }}>
             <img
               src="/logo.svg"
-              alt="Loan Bazar Logo"
-              style={{ width: '80px', height: '80px', borderRadius: '18px', marginBottom: '14px', boxShadow: '0 8px 16px rgba(0,0,0,0.1)' }}
+              alt="Logo"
+              style={{ width: '48px', height: '48px', margin: '0 auto 12px auto', borderRadius: '10px' }}
             />
             <h2 style={{ margin: 0, color: '#0F172A', fontSize: '22px', fontWeight: 700 }}>Loan Bazar Admin</h2>
-            <p style={{ margin: '6px 0 0 0', color: '#64748B', fontSize: '13px' }}>Sign in to manage credit underwriting & disbursals</p>
+            <p style={{ margin: '4px 0 0 0', color: '#64748B', fontSize: '13px' }}>Master Underwriting & Collection Portal</p>
           </div>
 
           {authError && (
@@ -574,21 +780,6 @@ export default function App() {
     );
   }
 
-  // Filter applications
-  const filteredApps = applications.filter((app) => {
-    const matchesSearch =
-      (app.fullName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (app.userPhone || '').includes(searchQuery) ||
-      (app.userEmail || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (app.panNumber || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (app.aadhaarNumber || '').includes(searchQuery) ||
-      (app.bankName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (app.accountNumber || '').includes(searchQuery) ||
-      (app.razorpayPaymentId || '').includes(searchQuery);
-    const matchesStatus = statusFilter === 'all' || app.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
-
   return (
     <div style={{ padding: '24px 30px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', background: '#f8fafc', minHeight: '100vh', boxSizing: 'border-box' }}>
       {/* Top Header */}
@@ -602,10 +793,30 @@ export default function App() {
             />
             <h1 style={{ margin: 0, color: '#0F172A', fontSize: '24px', fontWeight: 700 }}>Loan Bazar - Master Admin Portal</h1>
           </div>
-          <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '14px' }}>Underwriting, KYC Documents, Disbursals & AutoPay Governance</p>
+          <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '14px' }}>Underwriting, ₹1 Acceptance Verification, Disbursals & Automated EMI Recovery System</p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <a
+            href={RAZORPAY_ME_LINK}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: '#EFF6FF',
+              color: '#1D4ED8',
+              border: '1px solid #BFDBFE',
+              padding: '6px 14px',
+              borderRadius: '20px',
+              fontSize: '12px',
+              fontWeight: 600,
+              textDecoration: 'none'
+            }}
+          >
+            💳 Razorpay Payment Page ↗
+          </a>
           <div style={{ background: '#E2E8F0', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#334155', fontWeight: 500 }}>
             👤 admin@gmail.com
           </div>
@@ -627,8 +838,8 @@ export default function App() {
         </div>
       </header>
 
-      {/* Primary Navigation View Switcher */}
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', borderBottom: '2px solid #E2E8F0', paddingBottom: '12px' }}>
+      {/* Primary Navigation View Switcher (3 Tabs) */}
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', borderBottom: '2px solid #E2E8F0', paddingBottom: '12px', flexWrap: 'wrap' }}>
         <button
           onClick={() => setActiveView('applications')}
           style={{
@@ -647,6 +858,26 @@ export default function App() {
           }}
         >
           📋 Loan Applications ({applications.length})
+        </button>
+
+        <button
+          onClick={() => setActiveView('collections')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '10px 20px',
+            borderRadius: '8px',
+            border: 'none',
+            fontSize: '14px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            backgroundColor: activeView === 'collections' ? '#047857' : '#FFFFFF',
+            color: activeView === 'collections' ? '#FFFFFF' : '#475569',
+            boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+          }}
+        >
+          💰 EMI Collection & Recoveries ({activeDisbursedLoans.length} Active{overdueCount > 0 ? ` • ${overdueCount} Overdue` : ''})
         </button>
 
         <button
@@ -678,7 +909,7 @@ export default function App() {
           {/* Stats KPI Overview */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
             <div style={{ background: '#FFFFFF', padding: '16px 20px', borderRadius: '10px', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-              <div style={{ color: '#64748B', fontSize: '13px', fontWeight: 500 }}>Total Received</div>
+              <div style={{ color: '#64748B', fontSize: '13px', fontWeight: 500 }}>Total Applications</div>
               <div style={{ color: '#0F172A', fontSize: '24px', fontWeight: 700, marginTop: '4px' }}>{applications.length}</div>
             </div>
             <div style={{ background: '#FFFFFF', padding: '16px 20px', borderRadius: '10px', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
@@ -688,9 +919,9 @@ export default function App() {
               </div>
             </div>
             <div style={{ background: '#FFFFFF', padding: '16px 20px', borderRadius: '10px', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-              <div style={{ color: '#64748B', fontSize: '13px', fontWeight: 500 }}>AutoPay Registered (Ready)</div>
+              <div style={{ color: '#64748B', fontSize: '13px', fontWeight: 500 }}>₹1 Verified (Ready to Disburse)</div>
               <div style={{ color: '#3B82F6', fontSize: '24px', fontWeight: 700, marginTop: '4px' }}>
-                {applications.filter(a => a.status === 'autopay_done').length}
+                {applications.filter(a => a.status === 'acceptance_done' || a.status === 'autopay_done').length}
               </div>
             </div>
             <div style={{ background: '#FFFFFF', padding: '16px 20px', borderRadius: '10px', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
@@ -707,8 +938,8 @@ export default function App() {
               {[
                 { id: 'all', label: 'All' },
                 { id: 'under_review', label: 'Under Review' },
-                { id: 'approved', label: 'Approved (Waiting AutoPay)' },
-                { id: 'autopay_done', label: 'AutoPay Ready (Disburse)' },
+                { id: 'approved', label: 'Approved (Waiting ₹1)' },
+                { id: 'acceptance_done', label: '₹1 Verified (Disburse)' },
                 { id: 'disbursed', label: 'Disbursed' },
                 { id: 'rejected', label: 'Rejected' },
               ].map(tab => (
@@ -760,9 +991,9 @@ export default function App() {
                   <th>Employment & Income</th>
                   <th>Loan & EMI</th>
                   <th>Disbursal Bank Details</th>
-                  <th>All Documents (View/Download)</th>
-                  <th>Status & AutoPay</th>
-                  <th>Admin Action (Strict Workflow)</th>
+                  <th>Documents</th>
+                  <th>Status & ₹1 Fee</th>
+                  <th>Admin Action</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -777,6 +1008,7 @@ export default function App() {
                   filteredApps.map((app) => {
                     const appRate = adminRates[app.id] !== undefined ? adminRates[app.id] : (Number(app.interestRate) || 14.0);
                     const calc = calculateAdminLoan(app.amount, appRate, app.tenureMonths, app.tenureDays);
+                    const isAccepted = app.status === 'acceptance_done' || app.status === 'autopay_done';
 
                     return (
                       <tr key={app.id} style={{ borderBottom: '1px solid #f1f5f9', background: app.isBlocked ? '#fef2f2' : 'transparent' }}>
@@ -835,36 +1067,31 @@ export default function App() {
 
                         {/* All Documents Section */}
                         <td>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', minWidth: '180px' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', minWidth: '160px' }}>
                             <button
-                              onClick={() => setSelectedDoc({ title: `Live Face Selfie - ${app.fullName}`, url: app.selfieUrl || 'https://via.placeholder.com/600x400?text=Live+Selfie' })}
+                              onClick={() => setSelectedDoc({ title: `Live Face Selfie - ${app.fullName}`, url: app.selfieUrl || '' })}
                               style={{ padding: '4px 6px', cursor: 'pointer', background: app.selfieUrl ? '#eff6ff' : '#F1F5F9', border: '1px solid ' + (app.selfieUrl ? '#93c5fd' : '#CBD5E1'), borderRadius: '4px', fontSize: '11px', fontWeight: 600, color: app.selfieUrl ? '#1d4ed8' : '#334155' }}>
                               📸 Selfie
                             </button>
                             <button
-                              onClick={() => setSelectedDoc({ title: `House / Residence Photo - ${app.fullName}`, url: app.housePhotoUrl || app.homePhotoUrl || 'https://via.placeholder.com/600x400?text=House+Photo' })}
+                              onClick={() => setSelectedDoc({ title: `House Photo - ${app.fullName}`, url: app.housePhotoUrl || app.homePhotoUrl || '' })}
                               style={{ padding: '4px 6px', cursor: 'pointer', background: (app.housePhotoUrl || app.homePhotoUrl) ? '#f0fdf4' : '#F1F5F9', border: '1px solid ' + ((app.housePhotoUrl || app.homePhotoUrl) ? '#86efac' : '#CBD5E1'), borderRadius: '4px', fontSize: '11px', fontWeight: 600, color: (app.housePhotoUrl || app.homePhotoUrl) ? '#15803d' : '#334155' }}>
                               🏠 House
                             </button>
                             <button
-                              onClick={() => setSelectedDoc({ title: `PAN Card - ${app.fullName}`, url: app.panUrl || 'https://via.placeholder.com/600x400?text=PAN+Card' })}
-                              style={{ padding: '4px 6px', cursor: 'pointer', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '4px', fontSize: '11px', fontWeight: 500 }}>
-                              📄 PAN Card
+                              onClick={() => setSelectedDoc({ title: `PAN Card - ${app.fullName}`, url: app.panUrl || '' })}
+                              style={{ padding: '4px 6px', cursor: 'pointer', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '4px', fontSize: '11px' }}>
+                              📄 PAN
                             </button>
                             <button
-                              onClick={() => setSelectedDoc({ title: `Aadhaar Card - ${app.fullName}`, url: app.aadhaarUrl || app.panUrl || 'https://via.placeholder.com/600x400?text=Aadhaar+Card' })}
-                              style={{ padding: '4px 6px', cursor: 'pointer', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '4px', fontSize: '11px', fontWeight: 500 }}>
+                              onClick={() => setSelectedDoc({ title: `Aadhaar Card - ${app.fullName}`, url: app.aadhaarUrl || '' })}
+                              style={{ padding: '4px 6px', cursor: 'pointer', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '4px', fontSize: '11px' }}>
                               🆔 Aadhaar
-                            </button>
-                            <button
-                              onClick={() => setSelectedDoc({ title: `Income / Salary Proof - ${app.fullName}`, url: app.incomeProofUrl || app.proofUrl || 'https://via.placeholder.com/600x400?text=Income+Proof' })}
-                              style={{ gridColumn: 'span 2', padding: '4px 6px', cursor: 'pointer', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '4px', fontSize: '11px', fontWeight: 500 }}>
-                              💼 Salary Slip / Income
                             </button>
                           </div>
                         </td>
 
-                        {/* Status & AutoPay */}
+                        {/* Status & ₹1 Acceptance */}
                         <td>
                           <span style={{ 
                             padding: '4px 8px', 
@@ -873,18 +1100,19 @@ export default function App() {
                             fontWeight: 'bold',
                             display: 'inline-block',
                             marginBottom: '4px',
-                            background: app.status === 'disbursed' ? '#dcfce7' : app.status === 'autopay_done' ? '#e0f2fe' : app.status === 'approved' ? '#fef9c3' : app.status === 'rejected' ? '#fee2e2' : '#fffbeb',
-                            color: app.status === 'disbursed' ? '#15803d' : app.status === 'autopay_done' ? '#0369a1' : app.status === 'approved' ? '#a16207' : app.status === 'rejected' ? '#b91c1c' : '#b45309'
+                            background: app.status === 'disbursed' ? '#dcfce7' : isAccepted ? '#e0f2fe' : app.status === 'approved' ? '#fef9c3' : app.status === 'rejected' ? '#fee2e2' : '#fffbeb',
+                            color: app.status === 'disbursed' ? '#15803d' : isAccepted ? '#0369a1' : app.status === 'approved' ? '#a16207' : app.status === 'rejected' ? '#b91c1c' : '#b45309'
                           }}>
                             {app.status === 'under_review' && '⏳ Under Review'}
-                            {app.status === 'approved' && '✓ Approved (Waiting AutoPay)'}
-                            {app.status === 'autopay_done' && '⚡ AutoPay Registered'}
-                            {app.status === 'disbursed' && '💰 Disbursed'}
+                            {app.status === 'approved' && '✓ Approved (Waiting ₹1)'}
+                            {isAccepted && '⚡ ₹1 Verified (Accepted)'}
+                            {app.status === 'disbursed' && '💰 Disbursed (Active)'}
+                            {app.status === 'repaid' && '✓ Repaid & Closed'}
                             {app.status === 'rejected' && '✕ Rejected'}
                           </span>
-                          {app.razorpayPaymentId && (
+                          {(app.acceptancePaymentId || app.razorpayPaymentId) && (
                             <div style={{ fontSize: '11px', color: '#64748b' }}>
-                              Mandate: <code>{app.razorpayPaymentId}</code>
+                              Ref: <code>{app.acceptancePaymentId || app.razorpayPaymentId}</code>
                             </div>
                           )}
                         </td>
@@ -910,7 +1138,7 @@ export default function App() {
                                   </div>
                                 </div>
                                 <div style={{ display: 'flex', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
-                                  {[5, 10, 15, 20].map((r) => (
+                                  {[5, 10, 14, 18, 24].map((r) => (
                                     <button
                                       key={r}
                                       onClick={() => setAdminRates(prev => ({ ...prev, [app.id]: r }))}
@@ -929,14 +1157,10 @@ export default function App() {
                                     </button>
                                   ))}
                                 </div>
-                                <div style={{ fontSize: '10px', color: '#0369A1', lineHeight: '1.3' }}>
-                                  Interest: <b>+₹{calc.totalInterest.toLocaleString('en-IN')}</b><br />
-                                  {calc.isDays ? 'Bullet Due' : 'Monthly EMI'}: <b style={{ color: '#15803D' }}>₹{calc.emi.toLocaleString('en-IN')}</b>
-                                </div>
                               </div>
                               <button
                                 onClick={() => handleApprove(app.id, app.fullName, app, appRate)}
-                                style={{ background: '#16a34a', color: 'white', padding: '6px 12px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, fontSize: '12px', boxShadow: '0 2px 4px rgba(22,163,74,0.2)' }}>
+                                style={{ background: '#16a34a', color: 'white', padding: '6px 12px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>
                                 ✓ Approve @ {appRate}%
                               </button>
                               <button
@@ -950,14 +1174,14 @@ export default function App() {
                           {app.status === 'approved' && (
                             <div style={{ fontSize: '12px', color: '#0369A1', background: '#E0F2FE', padding: '8px', borderRadius: '6px', border: '1px solid #BAE6FD' }}>
                               <div style={{ fontWeight: 700, marginBottom: '2px' }}>✓ Approved @ {app.interestRate}%</div>
-                              <div style={{ fontSize: '11px', color: '#0284C7' }}>Waiting for user to accept offer & setup AutoPay in App</div>
+                              <div style={{ fontSize: '11px', color: '#0284C7' }}>Waiting for user to pay ₹1 acceptance fee in App</div>
                             </div>
                           )}
 
-                          {app.status === 'autopay_done' && (
+                          {isAccepted && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                               <div style={{ fontSize: '11px', color: '#047857', background: '#ECFDF5', padding: '4px 6px', borderRadius: '4px', fontWeight: 600, border: '1px solid #A7F3D0' }}>
-                                ⚡ AutoPay Mandate Active
+                                ⚡ ₹1 Verification Confirmed
                               </div>
                               <button
                                 onClick={() => handleDisburse(app.id, app)}
@@ -973,14 +1197,24 @@ export default function App() {
                                   boxShadow: '0 2px 6px rgba(37,99,235,0.35)'
                                 }}
                               >
-                                💳 Disburse ₹{(Number(app.netDisbursalAmount) || (Number(app.amount) - (Number(app.processingFee) || 200))).toLocaleString('en-IN')} to {app.bankName || 'Bank'}
+                                💳 Disburse ₹{(Number(app.netDisbursalAmount) || Number(app.amount)).toLocaleString('en-IN')} to {app.bankName || 'Bank'}
                               </button>
                             </div>
                           )}
 
                           {app.status === 'disbursed' && (
-                            <div style={{ color: '#16a34a', fontWeight: 700, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <span>✓</span> Amount Transferred to Bank
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              <div style={{ color: '#16a34a', fontWeight: 700, fontSize: '12px' }}>
+                                ✓ Funds Disbursed
+                              </div>
+                              <button
+                                onClick={() => {
+                                  setActiveView('collections');
+                                  setCollectionSearch(app.userPhone || app.fullName);
+                                }}
+                                style={{ background: '#047857', color: 'white', padding: '4px 8px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 600 }}>
+                                💰 Manage EMI Collection ↗
+                              </button>
                             </div>
                           )}
 
@@ -991,7 +1225,7 @@ export default function App() {
                           )}
                         </td>
 
-                        {/* More Options / Governance */}
+                        {/* More Options */}
                         <td>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             <button
@@ -1002,7 +1236,7 @@ export default function App() {
                             <button
                               onClick={() => toggleBlockUser(app.userPhone, app.isBlocked)}
                               style={{ background: app.isBlocked ? '#475569' : '#ea580c', color: 'white', padding: '4px 8px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 600 }}>
-                              {app.isBlocked ? 'Unblock' : 'Block User'}
+                              {app.isBlocked ? 'Unblock' : 'Block'}
                             </button>
                             <button
                               onClick={() => deleteApplication(app.id)}
@@ -1022,7 +1256,368 @@ export default function App() {
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 2: ALL USERS DIRECTORY & MANAGEMENT */}
+      {/* TAB 2: DEDICATED EMI COLLECTION & RECOVERIES PAGE */}
+      {/* ========================================================================= */}
+      {activeView === 'collections' && (
+        <div>
+          {/* Recovery Overview KPI Banner */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+            <div style={{ background: '#FFFFFF', padding: '16px 20px', borderRadius: '10px', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+              <div style={{ color: '#64748B', fontSize: '13px', fontWeight: 500 }}>Active Disbursed Loans</div>
+              <div style={{ color: '#0F172A', fontSize: '24px', fontWeight: 700, marginTop: '4px' }}>{activeDisbursedLoans.length}</div>
+            </div>
+            <div style={{ background: '#FFFFFF', padding: '16px 20px', borderRadius: '10px', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+              <div style={{ color: '#64748B', fontSize: '13px', fontWeight: 500 }}>Base EMI Due Portfolio</div>
+              <div style={{ color: '#1E3A8A', fontSize: '24px', fontWeight: 700, marginTop: '4px' }}>
+                ₹{totalBaseEmiDue.toLocaleString('en-IN')}
+              </div>
+            </div>
+            <div style={{ background: '#FEF2F2', padding: '16px 20px', borderRadius: '10px', border: '1px solid #FECACA', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+              <div style={{ color: '#991B1B', fontSize: '13px', fontWeight: 600 }}>🚨 Overdue Penalties Accrued (@ ₹100/day)</div>
+              <div style={{ color: '#DC2626', fontSize: '24px', fontWeight: 800, marginTop: '4px' }}>
+                +₹{totalAccruedPenalties.toLocaleString('en-IN')}
+                <span style={{ fontSize: '12px', fontWeight: 500, color: '#B91C1C', marginLeft: '6px' }}>({overdueCount} Overdue)</span>
+              </div>
+            </div>
+            <div style={{ background: '#F0FDF4', padding: '16px 20px', borderRadius: '10px', border: '1px solid #BBF7D0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+              <div style={{ color: '#15803D', fontSize: '13px', fontWeight: 600 }}>Total Current Collectible</div>
+              <div style={{ color: '#16A34A', fontSize: '24px', fontWeight: 800, marginTop: '4px' }}>
+                ₹{totalCollectibleAmount.toLocaleString('en-IN')}
+              </div>
+            </div>
+            <div style={{ background: '#FFFFFF', padding: '16px 20px', borderRadius: '10px', border: '1px solid #E2E8F0', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+              <div style={{ color: '#64748B', fontSize: '13px', fontWeight: 500 }}>Total Settled / Repaid</div>
+              <div style={{ color: '#047857', fontSize: '24px', fontWeight: 700, marginTop: '4px' }}>
+                ₹{totalSettledCapital.toLocaleString('en-IN')}
+              </div>
+            </div>
+          </div>
+
+          {/* Real-time Automated Repayments Live Feed Banner */}
+          {repaymentsList.length > 0 && (
+            <div style={{ background: '#FFFFFF', borderRadius: '12px', border: '1px solid #BBF7D0', padding: '18px 20px', marginBottom: '24px', boxShadow: '0 2px 4px rgba(0,0,0,0.04)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#10B981', display: 'inline-block', boxShadow: '0 0 8px #10B981' }}></span>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#065F46' }}>⚡ Live Automated Repayment Stream (Real-Time Sync from App)</h3>
+                </div>
+                <span style={{ fontSize: '12px', color: '#047857', fontWeight: 600, background: '#DCFCE7', padding: '3px 10px', borderRadius: '12px' }}>
+                  {repaymentsList.length} Payments Synced
+                </span>
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table border={0} cellPadding={8} style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ background: '#F0FDF4', color: '#166534', borderBottom: '1px solid #DCFCE7' }}>
+                      <th>Timestamp</th>
+                      <th>Borrower & Phone</th>
+                      <th>Payment Mode & UTR / Ref</th>
+                      <th>Base EMI</th>
+                      <th>Penalty Paid</th>
+                      <th>Total Received</th>
+                      <th>Milestone & Sync Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {repaymentsList.slice(0, 5).map((rep, idx) => (
+                      <tr key={rep.id || idx} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                        <td style={{ color: '#64748B' }}>
+                          {rep.paidAt?.toDate ? rep.paidAt.toDate().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : (rep.paidAt ? new Date(rep.paidAt).toLocaleTimeString('en-IN') : 'Just now')}
+                        </td>
+                        <td>
+                          <b>{rep.userName || 'Borrower'}</b> (📱 {rep.userPhone})
+                        </td>
+                        <td>
+                          <span style={{ textTransform: 'uppercase', background: '#E0F2FE', color: '#0369A1', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
+                            {rep.paymentMode || rep.method || 'Razorpay'}
+                          </span>{' '}
+                          <code>{rep.paymentId}</code>
+                        </td>
+                        <td style={{ fontWeight: 600 }}>₹{Number(rep.baseEmi || rep.amount).toLocaleString('en-IN')}</td>
+                        <td style={{ color: rep.penaltyPaid > 0 ? '#DC2626' : '#64748B', fontWeight: rep.penaltyPaid > 0 ? 700 : 400 }}>
+                          {rep.penaltyPaid > 0 ? `+₹${Number(rep.penaltyPaid).toLocaleString('en-IN')}` : '₹0'}
+                        </td>
+                        <td>
+                          <b style={{ color: '#059669', fontSize: '13px' }}>₹{Number(rep.amount).toLocaleString('en-IN')}</b>
+                        </td>
+                        <td>
+                          <span style={{ background: '#DCFCE7', color: '#15803D', padding: '2px 8px', borderRadius: '10px', fontWeight: 700, fontSize: '11px' }}>
+                            {rep.isFinalSettlement ? '🏆 Loan Closed' : (rep.type === 'acceptance_fee' ? '⚡ ₹1 Acceptance' : `✓ EMI #${rep.emiNumber || 1}`)} • Automated
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Collection Filter & Search Bar */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              {[
+                { id: 'all', label: 'All Active Loans' },
+                { id: 'overdue', label: `⚠️ Overdue (${overdueCount})` },
+                { id: 'due_soon', label: '⏰ Due Today / On Track' },
+                { id: 'repaid', label: '✅ Settled / Repaid' },
+              ].map((tab: any) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setCollectionFilter(tab.id)}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '20px',
+                    border: 'none',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    backgroundColor: collectionFilter === tab.id ? (tab.id === 'overdue' ? '#DC2626' : '#047857') : '#FFFFFF',
+                    color: collectionFilter === tab.id ? '#FFFFFF' : '#475569',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                placeholder="🔍 Search collection by borrower name, phone, PAN..."
+                value={collectionSearch}
+                onChange={(e) => setCollectionSearch(e.target.value)}
+                style={{
+                  padding: '10px 16px',
+                  borderRadius: '8px',
+                  border: '1px solid #CBD5E1',
+                  fontSize: '13px',
+                  width: '360px',
+                  outline: 'none',
+                  background: '#FFFFFF',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Collections Table */}
+          <div style={{ overflowX: 'auto', background: 'white', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', border: '1px solid #E2E8F0' }}>
+            <table border={0} cellPadding={14} style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+              <thead>
+                <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
+                  <th>Borrower Profile</th>
+                  <th>Loan & Disbursal Date</th>
+                  <th>EMI Due Date & Days</th>
+                  <th>Base EMI</th>
+                  <th>Accrued Penalty (@ ₹100/day)</th>
+                  <th>Total Due Amount</th>
+                  <th>Status</th>
+                  <th>Collection Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {collectionList.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} style={{ padding: '40px', textAlign: 'center', color: '#94A3B8' }}>
+                      No active loan collections found for this filter.
+                    </td>
+                  </tr>
+                ) : (
+                  collectionList.map((loan) => {
+                    const isOverdue = loan.isOverdue;
+                    return (
+                      <tr key={loan.id} style={{ borderBottom: '1px solid #f1f5f9', background: isOverdue ? '#fff5f5' : 'transparent' }}>
+                        {/* Borrower Profile */}
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            {loan.selfieUrl ? (
+                              <img
+                                src={loan.selfieUrl}
+                                alt="Selfie"
+                                style={{ width: '36px', height: '36px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #2563eb' }}
+                              />
+                            ) : (
+                              <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#1E3A8A', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                                {(loan.fullName || 'U')[0].toUpperCase()}
+                              </div>
+                            )}
+                            <div>
+                              <strong style={{ color: '#0F172A', fontSize: '14px' }}>{loan.fullName}</strong><br />
+                              <span style={{ fontSize: '12px', color: '#475569' }}>📱 +91 {loan.userPhone}</span><br />
+                              <span style={{ fontSize: '11px', color: '#64748B' }}>PAN: <code>{loan.panNumber || '—'}</code></span>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Loan & Disbursal */}
+                        <td>
+                          <strong style={{ color: '#0F172A', fontSize: '14px' }}>₹{Number(loan.amount).toLocaleString('en-IN')}</strong><br />
+                          <span style={{ fontSize: '11px', color: '#64748B' }}>{loan.tenureDisplay || `${loan.tenureMonths} Mos`} @ {loan.interestRate}%</span><br />
+                          <span style={{ fontSize: '11px', color: '#047857' }}>Disbursed: {loan.disbursedAt ? new Date(loan.disbursedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : '—'}</span>
+                        </td>
+
+                        {/* Due Date & Overdue Days */}
+                        <td>
+                          <div style={{ fontWeight: 700, color: isOverdue ? '#DC2626' : '#0F172A' }}>
+                            {loan.dueDateFormatted}
+                          </div>
+                          {isOverdue ? (
+                            <span style={{ display: 'inline-block', background: '#FEE2E2', color: '#DC2626', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, marginTop: '2px' }}>
+                              ⚠️ {loan.overdueDays} Days Overdue
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '11px', color: '#16A34A', fontWeight: 600 }}>
+                              {loan.statusLabel}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Base EMI */}
+                        <td>
+                          <span style={{ fontWeight: 600, color: '#334155' }}>
+                            ₹{Number(loan.monthlyEmi).toLocaleString('en-IN')}
+                          </span>
+                        </td>
+
+                        {/* Accrued Penalty */}
+                        <td>
+                          {loan.penalty > 0 ? (
+                            <div>
+                              <strong style={{ color: '#DC2626', fontSize: '14px' }}>+₹{loan.penalty.toLocaleString('en-IN')}</strong><br />
+                              <span style={{ fontSize: '10px', color: '#991B1B' }}>({loan.overdueDays}d × ₹100/day)</span>
+                            </div>
+                          ) : (
+                            <span style={{ color: '#16A34A', fontSize: '12px', fontWeight: 500 }}>₹0 (On Time)</span>
+                          )}
+                        </td>
+
+                        {/* Total Due Amount */}
+                        <td>
+                          <strong style={{ color: isOverdue ? '#DC2626' : '#047857', fontSize: '16px' }}>
+                            ₹{loan.totalDue.toLocaleString('en-IN')}
+                          </strong>
+                          {loan.status === 'repaid' && (
+                            <div style={{ fontSize: '11px', color: '#15803D', fontWeight: 600 }}>✓ Settled</div>
+                          )}
+                        </td>
+
+                        {/* Status */}
+                        <td>
+                          <span style={{
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            background: isOverdue ? '#FEE2E2' : (loan.status === 'repaid' ? '#DCFCE7' : '#EFF6FF'),
+                            color: isOverdue ? '#DC2626' : (loan.status === 'repaid' ? '#15803D' : '#1D4ED8')
+                          }}>
+                            {isOverdue ? '⚠️ Overdue' : (loan.status === 'repaid' ? '✅ Paid' : '⚡ Due Soon')}
+                          </span>
+                        </td>
+
+                        {/* Actions */}
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '160px' }}>
+                            {loan.status === 'disbursed' && (
+                              <button
+                                onClick={() => openRecordModal(loan)}
+                                style={{
+                                  background: '#047857',
+                                  color: 'white',
+                                  padding: '6px 10px',
+                                  border: 'none',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontWeight: 700,
+                                  fontSize: '12px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '4px',
+                                  boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                }}
+                              >
+                                💰 Record Collection
+                              </button>
+                            )}
+
+                            <div style={{ display: 'flex', gap: '4px' }}>
+                              <button
+                                onClick={() => sendWhatsAppReminder(loan)}
+                                style={{
+                                  flex: 1,
+                                  background: '#25D366',
+                                  color: 'white',
+                                  padding: '5px 8px',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                  fontSize: '11px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: '2px'
+                                }}
+                                title="Send pre-filled WhatsApp EMI reminder with payment link"
+                              >
+                                💬 WhatsApp
+                              </button>
+
+                              <a
+                                href={`tel:${loan.userPhone}`}
+                                style={{
+                                  background: '#1E3A8A',
+                                  color: 'white',
+                                  padding: '5px 8px',
+                                  borderRadius: '4px',
+                                  textDecoration: 'none',
+                                  fontWeight: 600,
+                                  fontSize: '11px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center'
+                                }}
+                                title="Call Borrower"
+                              >
+                                📞
+                              </a>
+
+                              {isOverdue && (
+                                <button
+                                  onClick={() => openWaiveModal(loan)}
+                                  style={{
+                                    background: '#F1F5F9',
+                                    color: '#334155',
+                                    border: '1px solid #CBD5E1',
+                                    padding: '5px 6px',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontSize: '11px',
+                                    fontWeight: 600
+                                  }}
+                                  title="Waive Late Penalty Fee"
+                                >
+                                  ⚖️ Waive
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB 3: ALL USERS DIRECTORY & MANAGEMENT */}
       {/* ========================================================================= */}
       {activeView === 'users' && (
         <div>
@@ -1077,7 +1672,6 @@ export default function App() {
               ))}
             </div>
 
-            {/* Dedicated User Search Bar */}
             <div style={{ position: 'relative' }}>
               <input
                 type="text"
@@ -1107,7 +1701,7 @@ export default function App() {
                   <th>Contact Info</th>
                   <th>Bank Account Details</th>
                   <th>Total Loan History</th>
-                  <th>All Documents</th>
+                  <th>Documents</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -1170,31 +1764,16 @@ export default function App() {
                         <span style={{ fontSize: '12px', color: '#64748B' }}>{user.totalLoans} Application(s)</span>
                       </td>
                       <td>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', minWidth: '170px' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', minWidth: '160px' }}>
                           <button 
-                            onClick={() => setSelectedDoc({ title: 'Live Selfie - ' + user.name, url: user.photoUrl || user.selfieUrl || 'https://via.placeholder.com/600x400?text=Live+Selfie' })}
+                            onClick={() => setSelectedDoc({ title: 'Live Selfie - ' + user.name, url: user.photoUrl || user.selfieUrl || '' })}
                             style={{ padding: '3px 6px', cursor: 'pointer', background: (user.photoUrl || user.selfieUrl) ? '#eff6ff' : '#F1F5F9', border: '1px solid ' + ((user.photoUrl || user.selfieUrl) ? '#93c5fd' : '#CBD5E1'), borderRadius: '4px', fontSize: '11px', fontWeight: (user.photoUrl || user.selfieUrl) ? 600 : 400, color: (user.photoUrl || user.selfieUrl) ? '#1d4ed8' : '#334155' }}>
                             📸 Selfie
                           </button>
                           <button 
-                            onClick={() => setSelectedDoc({ title: 'House Photo - ' + user.name, url: user.housePhotoUrl || 'https://via.placeholder.com/600x400?text=House+Photo' })}
+                            onClick={() => setSelectedDoc({ title: 'House Photo - ' + user.name, url: user.housePhotoUrl || '' })}
                             style={{ padding: '3px 6px', cursor: 'pointer', background: user.housePhotoUrl ? '#f0fdf4' : '#F1F5F9', border: '1px solid ' + (user.housePhotoUrl ? '#86efac' : '#CBD5E1'), borderRadius: '4px', fontSize: '11px', fontWeight: user.housePhotoUrl ? 600 : 400, color: user.housePhotoUrl ? '#15803d' : '#334155' }}>
                             🏠 House
-                          </button>
-                          <button 
-                            onClick={() => setSelectedDoc({ title: 'PAN - ' + user.name, url: user.panUrl || 'https://via.placeholder.com/600x400?text=PAN+Card' })}
-                            style={{ padding: '3px 6px', cursor: 'pointer', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '4px', fontSize: '11px' }}>
-                            📄 PAN
-                          </button>
-                          <button 
-                            onClick={() => setSelectedDoc({ title: 'Aadhaar - ' + user.name, url: user.aadhaarUrl || 'https://via.placeholder.com/600x400?text=Aadhaar+Card' })}
-                            style={{ padding: '3px 6px', cursor: 'pointer', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '4px', fontSize: '11px' }}>
-                            🆔 Aadhaar
-                          </button>
-                          <button 
-                            onClick={() => setSelectedDoc({ title: 'Salary / Income Proof - ' + user.name, url: user.incomeProofUrl || 'https://via.placeholder.com/600x400?text=Income+Proof' })}
-                            style={{ gridColumn: 'span 2', padding: '3px 6px', cursor: 'pointer', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '4px', fontSize: '11px' }}>
-                            💼 Salary Slip
                           </button>
                         </div>
                       </td>
@@ -1237,11 +1816,179 @@ export default function App() {
       )}
 
       {/* ========================================================================= */}
-      {/* DOSSIER MODAL: COMPLETE APPLICATION DETAILS */}
+      {/* MODAL 1: RECORD COLLECTION PAYMENT */}
+      {/* ========================================================================= */}
+      {recordingLoan && (() => {
+        const metrics = computeLoanCollectionMetrics(recordingLoan);
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1050, padding: '20px' }}>
+            <div style={{ background: 'white', borderRadius: '16px', maxWidth: '560px', width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: '24px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #E2E8F0', paddingBottom: '12px', marginBottom: '16px' }}>
+                <div>
+                  <h3 style={{ margin: 0, color: '#0F172A', fontSize: '18px' }}>💰 Record Collection Payment</h3>
+                  <span style={{ fontSize: '12px', color: '#64748B' }}>Borrower: <b>{recordingLoan.fullName}</b> (📱 +91 {recordingLoan.userPhone})</span>
+                </div>
+                <button onClick={() => setRecordingLoan(null)} style={{ background: 'transparent', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#64748B' }}>✕</button>
+              </div>
+
+              {/* Dues Breakdown Info Box */}
+              <div style={{ background: '#F8FAFC', padding: '14px', borderRadius: '10px', border: '1px solid #E2E8F0', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px' }}>
+                  <span>Base Monthly EMI:</span>
+                  <b>₹{Number(recordingLoan.monthlyEmi).toLocaleString('en-IN')}</b>
+                </div>
+                {metrics.isOverdue && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px', color: '#DC2626' }}>
+                    <span>Accrued Penalty ({metrics.overdueDays} days @ ₹100/day):</span>
+                    <b>+₹{metrics.penalty.toLocaleString('en-IN')}</b>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '8px', borderTop: '1px solid #E2E8F0', fontSize: '14px', fontWeight: 700, color: '#047857' }}>
+                  <span>Total Calculated Due:</span>
+                  <span>₹{metrics.totalDue.toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+
+              {/* Payment Entry Form */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                    Amount Collected (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    value={recordAmount}
+                    onChange={(e) => setRecordAmount(Number(e.target.value))}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '14px', fontWeight: 'bold', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                    Payment Mode
+                  </label>
+                  <select
+                    value={recordMode}
+                    onChange={(e) => setRecordMode(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '13px', background: 'white', boxSizing: 'border-box' }}
+                  >
+                    <option value="razorpay">Razorpay Link (razorpay.me/@mrugeshjaykumarchauhan)</option>
+                    <option value="upi">UPI App (GPay / PhonePe / Paytm)</option>
+                    <option value="bank_transfer">Direct Bank Transfer (IMPS/NEFT)</option>
+                    <option value="cash">Cash Collection</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                    Payment ID / UTR / Reference No. *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. pay_Nxz8912 or 12-digit bank UTR"
+                    value={recordUtr}
+                    onChange={(e) => setRecordUtr(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                {metrics.isOverdue && (
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                      Penalty Discount / Waived Amount (₹ if any)
+                    </label>
+                    <input
+                      type="number"
+                      value={recordWaived}
+                      onChange={(e) => setRecordWaived(Number(e.target.value))}
+                      placeholder="0"
+                      style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '13px', boxSizing: 'border-box' }}
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '4px' }}>
+                    Remarks / Notes
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Verified in Razorpay / bank account"
+                    value={recordNotes}
+                    onChange={(e) => setRecordNotes(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '13px', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px', borderTop: '1px solid #E2E8F0', paddingTop: '16px' }}>
+                <button
+                  onClick={() => setRecordingLoan(null)}
+                  style={{ padding: '8px 16px', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={submitRecordCollection}
+                  style={{ padding: '8px 20px', background: '#047857', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 700 }}
+                >
+                  ✓ Confirm & Mark Paid
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ========================================================================= */}
+      {/* MODAL 2: WAIVE PENALTY */}
+      {/* ========================================================================= */}
+      {waivingLoan && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1050, padding: '20px' }}>
+          <div style={{ background: 'white', borderRadius: '16px', maxWidth: '440px', width: '100%', padding: '24px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)' }}>
+            <h3 style={{ margin: '0 0 8px 0', color: '#0F172A', fontSize: '18px' }}>⚖️ Waive Overdue Penalty</h3>
+            <p style={{ margin: '0 0 16px 0', color: '#64748B', fontSize: '13px' }}>
+              Borrower: <b>{waivingLoan.fullName}</b>
+            </p>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#334155', marginBottom: '6px' }}>
+                Penalty Amount to Waive (₹)
+              </label>
+              <input
+                type="number"
+                value={waiveAmount}
+                onChange={(e) => setWaiveAmount(Number(e.target.value))}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '15px', fontWeight: 'bold', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                onClick={() => setWaivingLoan(null)}
+                style={{ padding: '8px 16px', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitWaivePenalty}
+                style={{ padding: '8px 18px', background: '#1E3A8A', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 700 }}
+              >
+                Confirm Waiver
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 3: DOSSIER MODAL */}
       {/* ========================================================================= */}
       {detailedApp && (() => {
         const modalRate = adminRates[detailedApp.id] !== undefined ? adminRates[detailedApp.id] : (Number(detailedApp.interestRate) || 14.0);
         const modalCalc = calculateAdminLoan(detailedApp.amount, modalRate, detailedApp.tenureMonths, detailedApp.tenureDays);
+        const isAccepted = detailedApp.status === 'acceptance_done' || detailedApp.status === 'autopay_done';
 
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
@@ -1254,7 +2001,7 @@ export default function App() {
                 <button onClick={() => setDetailedApp(null)} style={{ background: 'transparent', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#64748B' }}>✕</button>
               </div>
 
-              {/* Admin Interest Rate Setter & Live Calculation Box (when under_review or approved) */}
+              {/* Admin Interest Rate Setter & Live Calculation Box */}
               {detailedApp.status === 'under_review' && (
                 <div style={{ background: '#F0FDF4', padding: '16px', borderRadius: '12px', border: '1px solid #86EFAC', marginBottom: '20px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -1315,13 +2062,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Extra Repayment Summary */}
-              <div style={{ background: '#F8FAFC', padding: '12px 16px', borderRadius: '8px', border: '1px solid #E2E8F0', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-                <div><b>Interest Rate:</b> {modalRate}% p.a.</div>
-                <div><b>Tenure:</b> {modalCalc.tenureDisplay}</div>
-                <div><b>Repayment Schedule:</b> <b style={{ color: '#0F172A' }}>{modalCalc.frequencyText}</b></div>
-              </div>
-
               {/* Profile & Disbursal Bank Details */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
                 <div style={{ background: '#F8FAFC', padding: '16px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
@@ -1339,8 +2079,8 @@ export default function App() {
                   <div style={{ marginBottom: '4px' }}><b>Account No:</b> <code>{detailedApp.accountNumber || 'N/A'}</code></div>
                   <div style={{ marginBottom: '4px' }}><b>IFSC Code:</b> <code>{detailedApp.ifscCode || 'N/A'}</code></div>
                   <div style={{ marginBottom: '4px' }}><b>A/C Holder:</b> {detailedApp.accountHolderName || detailedApp.fullName}</div>
-                  {detailedApp.razorpayPaymentId && (
-                    <div style={{ marginTop: '6px', color: '#15803D' }}><b>AutoPay Mandate ID:</b> <code>{detailedApp.razorpayPaymentId}</code></div>
+                  {(detailedApp.acceptancePaymentId || detailedApp.razorpayPaymentId) && (
+                    <div style={{ marginTop: '6px', color: '#15803D' }}><b>₹1 Acceptance Verification Ref:</b> <code>{detailedApp.acceptancePaymentId || detailedApp.razorpayPaymentId}</code></div>
                   )}
                 </div>
               </div>
@@ -1348,21 +2088,18 @@ export default function App() {
               {/* Documents Section */}
               <div style={{ marginBottom: '20px' }}>
                 <h4 style={{ margin: '0 0 10px 0', color: '#0F172A' }}>Uploaded KYC & Verification Documents</h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
                   <button onClick={() => setSelectedDoc({ title: `Live Face Selfie - ${detailedApp.fullName}`, url: detailedApp.selfieUrl || '' })} style={{ padding: '10px', background: detailedApp.selfieUrl ? '#EFF6FF' : '#F1F5F9', border: '1px solid ' + (detailedApp.selfieUrl ? '#93C5FD' : '#CBD5E1'), borderRadius: '8px', cursor: 'pointer', textAlign: 'center', fontWeight: detailedApp.selfieUrl ? 600 : 400, color: detailedApp.selfieUrl ? '#1E3A8A' : '#334155' }}>
                     📸 Live Selfie
                   </button>
-                  <button onClick={() => setSelectedDoc({ title: `House / Residence Photo - ${detailedApp.fullName}`, url: detailedApp.housePhotoUrl || detailedApp.homePhotoUrl || '' })} style={{ padding: '10px', background: (detailedApp.housePhotoUrl || detailedApp.homePhotoUrl) ? '#F0FDF4' : '#F1F5F9', border: '1px solid ' + ((detailedApp.housePhotoUrl || detailedApp.homePhotoUrl) ? '#86EFAC' : '#CBD5E1'), borderRadius: '8px', cursor: 'pointer', textAlign: 'center', fontWeight: (detailedApp.housePhotoUrl || detailedApp.homePhotoUrl) ? 600 : 400, color: (detailedApp.housePhotoUrl || detailedApp.homePhotoUrl) ? '#15803D' : '#334155' }}>
+                  <button onClick={() => setSelectedDoc({ title: `House Photo - ${detailedApp.fullName}`, url: detailedApp.housePhotoUrl || detailedApp.homePhotoUrl || '' })} style={{ padding: '10px', background: (detailedApp.housePhotoUrl || detailedApp.homePhotoUrl) ? '#F0FDF4' : '#F1F5F9', border: '1px solid ' + ((detailedApp.housePhotoUrl || detailedApp.homePhotoUrl) ? '#86EFAC' : '#CBD5E1'), borderRadius: '8px', cursor: 'pointer', textAlign: 'center', fontWeight: (detailedApp.housePhotoUrl || detailedApp.homePhotoUrl) ? 600 : 400, color: (detailedApp.housePhotoUrl || detailedApp.homePhotoUrl) ? '#15803D' : '#334155' }}>
                     🏠 House Photo
                   </button>
                   <button onClick={() => setSelectedDoc({ title: `PAN Card - ${detailedApp.fullName}`, url: detailedApp.panUrl || '' })} style={{ padding: '10px', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '8px', cursor: 'pointer', textAlign: 'center' }}>
                     📄 PAN Card
                   </button>
-                  <button onClick={() => setSelectedDoc({ title: `Aadhaar Card - ${detailedApp.fullName}`, url: detailedApp.aadhaarUrl || detailedApp.panUrl || '' })} style={{ padding: '10px', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '8px', cursor: 'pointer', textAlign: 'center' }}>
+                  <button onClick={() => setSelectedDoc({ title: `Aadhaar Card - ${detailedApp.fullName}`, url: detailedApp.aadhaarUrl || '' })} style={{ padding: '10px', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '8px', cursor: 'pointer', textAlign: 'center' }}>
                     🆔 Aadhaar Card
-                  </button>
-                  <button onClick={() => setSelectedDoc({ title: `Salary Slip - ${detailedApp.fullName}`, url: detailedApp.incomeProofUrl || detailedApp.proofUrl || '' })} style={{ padding: '10px', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '8px', cursor: 'pointer', textAlign: 'center' }}>
-                    💼 Salary Slip
                   </button>
                 </div>
               </div>
@@ -1375,15 +2112,15 @@ export default function App() {
                 <div style={{ display: 'flex', gap: '10px' }}>
                   {detailedApp.status === 'under_review' && (
                     <>
-                      <button onClick={() => handleApprove(detailedApp.id, detailedApp.fullName, detailedApp, modalRate)} style={{ background: '#16A34A', color: 'white', padding: '8px 18px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, boxShadow: '0 2px 4px rgba(22,163,74,0.3)' }}>
+                      <button onClick={() => handleApprove(detailedApp.id, detailedApp.fullName, detailedApp, modalRate)} style={{ background: '#16A34A', color: 'white', padding: '8px 18px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}>
                         ✓ Approve Offer @ {modalRate}%
                       </button>
                       <button onClick={() => handleReject(detailedApp.id, detailedApp.fullName)} style={{ background: '#DC2626', color: 'white', padding: '8px 16px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}>
-                        ✕ Reject Application
+                        ✕ Reject
                       </button>
                     </>
                   )}
-                  {detailedApp.status === 'autopay_done' && (
+                  {isAccepted && (
                     <button onClick={() => handleDisburse(detailedApp.id, detailedApp)} style={{ background: '#2563EB', color: 'white', padding: '8px 18px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, boxShadow: '0 2px 6px rgba(37,99,235,0.35)' }}>
                       💳 Disburse ₹{modalCalc.netDisbursal.toLocaleString('en-IN')} to {detailedApp.bankName}
                     </button>
@@ -1399,7 +2136,7 @@ export default function App() {
       })()}
 
       {/* ========================================================================= */}
-      {/* DOCUMENT PREVIEW & DOWNLOAD LIGHTBOX MODAL */}
+      {/* MODAL 4: DOCUMENT PREVIEW & DOWNLOAD LIGHTBOX */}
       {/* ========================================================================= */}
       {selectedDoc && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '20px' }}>

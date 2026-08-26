@@ -1,6 +1,6 @@
 import React from 'react';
 import type { ApplicationStatus } from '../types/loan';
-import { Clock, CheckCircle2, ShieldCheck, Wallet, XCircle } from 'lucide-react';
+import { Clock, CheckCircle2, ShieldCheck, Wallet, XCircle, CheckSquare } from 'lucide-react';
 
 interface StatusBadgeProps {
   status: ApplicationStatus;
@@ -16,25 +16,39 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
       icon: <Clock size={13} />,
     },
     approved: {
-      label: 'Approved',
-      bg: '#ECFDF5',
-      text: '#047857',
-      border: '#A7F3D0',
+      label: 'Approved (Waiting ₹1)',
+      bg: '#FEF9C3',
+      text: '#A16207',
+      border: '#FDE047',
       icon: <CheckCircle2 size={13} />,
     },
+    acceptance_done: {
+      label: '₹1 Verified (Accepted)',
+      bg: '#EFF6FF',
+      text: '#1D4ED8',
+      border: '#BFDBFE',
+      icon: <ShieldCheck size={13} />,
+    },
     autopay_done: {
-      label: 'AutoPay Registered',
+      label: '₹1 Verified (Accepted)',
       bg: '#EFF6FF',
       text: '#1D4ED8',
       border: '#BFDBFE',
       icon: <ShieldCheck size={13} />,
     },
     disbursed: {
-      label: 'Disbursed',
-      bg: '#FAF5FF',
-      text: '#7E22CE',
-      border: '#E9D5FF',
+      label: 'Disbursed (Active)',
+      bg: '#DCFCE7',
+      text: '#15803D',
+      border: '#86EFAC',
       icon: <Wallet size={13} />,
+    },
+    repaid: {
+      label: 'Loan Repaid ✓',
+      bg: '#ECFDF5',
+      text: '#047857',
+      border: '#6EE7B7',
+      icon: <CheckSquare size={13} />,
     },
     rejected: {
       label: 'Rejected',
