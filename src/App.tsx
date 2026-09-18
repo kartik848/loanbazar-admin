@@ -15,8 +15,6 @@ import {
   addDoc,
 } from 'firebase/firestore';
 
-const RAZORPAY_ME_LINK = 'https://razorpay.me/@mrugeshjaykumarchauhan';
-
 const firebaseConfig = {
   apiKey: "AIzaSyCzvSmn2A_kSLrDfA3frRzj2WWwFs7p3VQ",
   appId: "1:536165799568:web:d57bd180486fd4f319ea15",
@@ -360,7 +358,7 @@ export default function App() {
 
   // 2.2 Admin Reject ₹1 Acceptance Fee Payment
   const handleRejectAcceptance = async (id: string, appItem: any) => {
-    const reason = window.prompt(`Enter ₹1 verification rejection reason for ${appItem.fullName}:`, "Payment not received in Razorpay account / Invalid UTR reference");
+    const reason = window.prompt(`Enter ₹1 verification rejection reason for ${appItem.fullName}:`, "Payment not received in bank account / Invalid UTR reference");
     if (reason === null) return;
 
     const updateData: any = {
@@ -368,6 +366,7 @@ export default function App() {
       acceptanceFeePaid: false,
       acceptanceRejectReason: reason || 'Invalid UTR reference / payment not received',
       acceptancePaymentId: null,
+      acceptanceScreenshotUrl: null,
       razorpayPaymentId: null,
     };
 
@@ -470,6 +469,7 @@ export default function App() {
       if (loanId) {
         await updateDoc(doc(db, 'applications', loanId), {
           pendingEmiPaymentId: null,
+          pendingEmiScreenshotUrl: null,
           pendingEmiRejectReason: reason,
         });
       }
@@ -478,7 +478,7 @@ export default function App() {
     }
 
     if (loanId) {
-      setApplications(prev => prev.map(a => a.id === loanId ? { ...a, pendingEmiPaymentId: undefined, pendingEmiRejectReason: reason } : a));
+      setApplications(prev => prev.map(a => a.id === loanId ? { ...a, pendingEmiPaymentId: undefined, pendingEmiScreenshotUrl: undefined, pendingEmiRejectReason: reason } : a));
     }
     setRepaymentsList(prev => prev.map(r => r.id === repItem.id ? { ...r, status: 'rejected', rejectedReason: reason } : r));
     alert(`✕ EMI payment rejected. User notified in app.`);
@@ -634,7 +634,7 @@ export default function App() {
       overdueText = `\n⚠️ *STATUS: OVERDUE BY ${metrics.overdueDays} DAYS*\n• Late Penalty (@ ₹100/day): ₹${metrics.penalty.toLocaleString('en-IN')}`;
     }
 
-    const message = `Namaste ${name},\n\nThis is an automated repayment alert from *Loan Bazar* for your Loan Account #${loanId}.\n\n📊 *Repayment Breakdown:*\n• Sanctioned Principal: ₹${Number(loan.amount).toLocaleString('en-IN')}\n• EMI Due Date: ${dueDate}\n• Base EMI Amount: ₹${emi}${overdueText}\n• *Total Amount Payable: ₹${total}*\n\n⚠️ *Note:* As per policy, late penalty of ₹100 per day is charged for delayed payments.\n\n💳 *Instant Repayment Link (Auto Amount Pre-fill):*\n${RAZORPAY_ME_LINK}?amount=${metrics.totalDue}\n\nYour repayment will be automatically recorded and verified in the app instantly.\n\nRegards,\n*Loan Bazar Credit & Collections Team*\n📞 +91 9016131681`;
+    const message = `Namaste ${name},\n\nThis is an automated repayment alert from *Loan Bazar* for your Loan Account #${loanId}.\n\n📊 *Repayment Breakdown:*\n• Sanctioned Principal: ₹${Number(loan.amount).toLocaleString('en-IN')}\n• EMI Due Date: ${dueDate}\n• Base EMI Amount: ₹${emi}${overdueText}\n• *Total Amount Payable: ₹${total}*\n\n⚠️ *Note:* As per policy, late penalty of ₹100 per day is charged for delayed payments.\n\n📲 *How to Repay:*\nPlease open your *Loan Bazar mobile app* or scan the official Loan Bazar UPI QR Code to pay ₹${total}.\nUpload your payment screenshot & UTR in the app for instant automated verification.\n\nRegards,\n*Loan Bazar Credit & Collections Team*\n📞 +91 9016131681`;
 
     const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
     window.open(waUrl, '_blank');
@@ -959,10 +959,8 @@ export default function App() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <a
-            href={RAZORPAY_ME_LINK}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            onClick={() => setSelectedDoc({ title: 'Loan Bazar Official Payment QR Scanner', url: '/loanbazarscanner.jpeg' })}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -974,11 +972,11 @@ export default function App() {
               borderRadius: '20px',
               fontSize: '12px',
               fontWeight: 600,
-              textDecoration: 'none'
+              cursor: 'pointer'
             }}
           >
-            💳 Razorpay Payment Page ↗
-          </a>
+            📲 Loan Bazar QR Scanner 🔍
+          </button>
           <div style={{ background: '#E2E8F0', padding: '6px 12px', borderRadius: '20px', fontSize: '13px', color: '#334155', fontWeight: 500 }}>
             👤 admin@gmail.com
           </div>
@@ -1251,6 +1249,20 @@ export default function App() {
                               style={{ padding: '4px 6px', cursor: 'pointer', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '4px', fontSize: '11px' }}>
                               🆔 Aadhaar
                             </button>
+                            {app.acceptanceScreenshotUrl && (
+                              <button
+                                onClick={() => setSelectedDoc({ title: `₹1 Acceptance Payment Proof - ${app.fullName}`, url: app.acceptanceScreenshotUrl })}
+                                style={{ padding: '4px 6px', cursor: 'pointer', background: '#FEF3C7', border: '1px solid #F59E0B', borderRadius: '4px', fontSize: '11px', fontWeight: 700, color: '#B45309' }}>
+                                🧾 ₹1 Proof
+                              </button>
+                            )}
+                            {app.pendingEmiScreenshotUrl && (
+                              <button
+                                onClick={() => setSelectedDoc({ title: `EMI Payment Proof - ${app.fullName}`, url: app.pendingEmiScreenshotUrl })}
+                                style={{ padding: '4px 6px', cursor: 'pointer', background: '#EFF6FF', border: '1px solid #93C5FD', borderRadius: '4px', fontSize: '11px', fontWeight: 700, color: '#1D4ED8' }}>
+                                🧾 EMI Proof
+                              </button>
+                            )}
                           </div>
                         </td>
 
@@ -1351,6 +1363,14 @@ export default function App() {
                                 <span style={{ fontSize: '10px', color: '#64748B' }}>Submitted UTR:</span><br />
                                 <code style={{ fontWeight: 800, color: '#1E3A8A', fontSize: '12px' }}>{app.acceptancePaymentId || app.razorpayPaymentId || 'N/A'}</code>
                               </div>
+                              {app.acceptanceScreenshotUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedDoc({ title: `₹1 Acceptance Payment Proof - ${app.fullName}`, url: app.acceptanceScreenshotUrl })}
+                                  style={{ background: '#0284C7', color: 'white', padding: '6px 8px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                                  📸 View Screenshot Proof ↗
+                                </button>
+                              )}
                               <button
                                 onClick={() => handleApproveAcceptance(app.id, app)}
                                 style={{ background: '#16a34a', color: 'white', padding: '6px 8px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, fontSize: '11px' }}>
@@ -1502,6 +1522,7 @@ export default function App() {
                       <th>Payment Type</th>
                       <th>Amount Received</th>
                       <th>Submitted UTR / Ref</th>
+                      <th>Payment Proof</th>
                       <th style={{ textAlign: 'center' }}>Admin Action (Approve / Reject)</th>
                     </tr>
                   </thead>
@@ -1527,6 +1548,34 @@ export default function App() {
                           <code style={{ fontWeight: 800, color: '#1E3A8A', background: '#F1F5F9', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', border: '1px solid #CBD5E1' }}>
                             {rep.paymentId}
                           </code>
+                        </td>
+                        <td>
+                          {(() => {
+                            const proofUrl = rep.screenshotUrl || (rep.type === 'acceptance_fee' ? applications.find(a => a.id === rep.applicationId)?.acceptanceScreenshotUrl : applications.find(a => a.id === rep.applicationId)?.pendingEmiScreenshotUrl);
+                            if (proofUrl) {
+                              return (
+                                <button
+                                  onClick={() => setSelectedDoc({ title: `Payment Screenshot - ${rep.userName || 'Borrower'} (UTR: ${rep.paymentId})`, url: proofUrl })}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    background: '#EFF6FF',
+                                    border: '1px solid #93C5FD',
+                                    color: '#1D4ED8',
+                                    padding: '4px 8px',
+                                    borderRadius: '6px',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer'
+                                  }}
+                                >
+                                  📸 View Screenshot
+                                </button>
+                              );
+                            }
+                            return <span style={{ color: '#94A3B8', fontSize: '11px' }}>No screenshot</span>;
+                          })()}
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
@@ -2157,7 +2206,7 @@ export default function App() {
                     onChange={(e) => setRecordMode(e.target.value)}
                     style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '13px', background: 'white', boxSizing: 'border-box' }}
                   >
-                    <option value="razorpay">Razorpay Link (razorpay.me/@mrugeshjaykumarchauhan)</option>
+                    <option value="upi_qr">LoanBazar QR Scanner (UPI)</option>
                     <option value="upi">UPI App (GPay / PhonePe / Paytm)</option>
                     <option value="bank_transfer">Direct Bank Transfer (IMPS/NEFT)</option>
                     <option value="cash">Cash Collection</option>
@@ -2386,6 +2435,16 @@ export default function App() {
                   <button onClick={() => setSelectedDoc({ title: `Aadhaar Card - ${detailedApp.fullName}`, url: detailedApp.aadhaarUrl || '' })} style={{ padding: '10px', background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '8px', cursor: 'pointer', textAlign: 'center' }}>
                     🆔 Aadhaar Card
                   </button>
+                  {detailedApp.acceptanceScreenshotUrl && (
+                    <button onClick={() => setSelectedDoc({ title: `₹1 Acceptance Payment Proof - ${detailedApp.fullName}`, url: detailedApp.acceptanceScreenshotUrl })} style={{ padding: '10px', background: '#FEF3C7', border: '1px solid #F59E0B', borderRadius: '8px', cursor: 'pointer', textAlign: 'center', fontWeight: 700, color: '#B45309' }}>
+                      🧾 ₹1 Proof
+                    </button>
+                  )}
+                  {detailedApp.pendingEmiScreenshotUrl && (
+                    <button onClick={() => setSelectedDoc({ title: `EMI Payment Proof - ${detailedApp.fullName}`, url: detailedApp.pendingEmiScreenshotUrl })} style={{ padding: '10px', background: '#EFF6FF', border: '1px solid #93C5FD', borderRadius: '8px', cursor: 'pointer', textAlign: 'center', fontWeight: 700, color: '#1D4ED8' }}>
+                      🧾 EMI Proof
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -2407,6 +2466,11 @@ export default function App() {
                   )}
                   {detailedApp.status === 'acceptance_submitted' && (
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      {detailedApp.acceptanceScreenshotUrl && (
+                        <button onClick={() => setSelectedDoc({ title: `₹1 Acceptance Payment Proof - ${detailedApp.fullName}`, url: detailedApp.acceptanceScreenshotUrl })} style={{ background: '#0284C7', color: 'white', padding: '8px 14px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700, fontSize: '12px' }}>
+                          📸 View Screenshot Proof ↗
+                        </button>
+                      )}
                       <button onClick={() => handleApproveAcceptance(detailedApp.id, detailedApp)} style={{ background: '#16A34A', color: 'white', padding: '8px 18px', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 700 }}>
                         ✓ Payment Received (Approve ₹1)
                       </button>

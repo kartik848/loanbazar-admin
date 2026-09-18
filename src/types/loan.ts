@@ -21,6 +21,7 @@ export interface LoanRepaymentRecord {
   paidAt: string | any;
   method?: string;
   paymentMode?: string;
+  screenshotUrl?: string;
   notes?: string;
   userName?: string;
   userPhone?: string;
@@ -80,11 +81,13 @@ export interface LoanApplication {
   autoPayConsentAccepted?: boolean;
   acceptanceFeePaid?: boolean;
   acceptancePaymentId?: string;
+  acceptanceScreenshotUrl?: string;
   acceptanceSubmittedAt?: string | any;
   acceptancePaidAt?: string | any;
   acceptanceRejectReason?: string;
   pendingEmiPaymentId?: string;
   pendingEmiAmount?: number;
+  pendingEmiScreenshotUrl?: string;
   pendingEmiSubmittedAt?: string | any;
   pendingEmiRejectReason?: string;
   razorpayPaymentId?: string;
